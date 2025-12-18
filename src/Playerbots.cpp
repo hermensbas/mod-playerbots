@@ -226,14 +226,24 @@ bool OnPlayerBeforeTeleport(Player* player, uint32 mapid, float /*x*/, float /*y
 
     void OnPlayerGiveXP(Player* player, uint32& amount, Unit* /*victim*/, uint8 /*xpSource*/) override
     {
-        // no XP multiplier, when player is no bot.
-        if (!player || !player->GetSession()->IsBot())
+        // Only applies to bot sessions.
+        if (!player)
+            return;
+
+        WorldSession* session = player->GetSession();
+        if (!session || !session->IsBot())
+            return;
+
+        // During early login / scripted quest completion a bot can receive XP before its PlayerbotAI is initialized.
+        // Guard against null to avoid crashes.
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(player);
+        if (!botAI)
             return;
 
         // no XP gain, if master is not a bot and has xp gain disabled.
-        if (const Player* master = GET_PLAYERBOT_AI(player)->GetMaster())
+        if (const Player* master = botAI->GetMaster())
         {
-            if (!master->GetSession()->IsBot() && master->HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN))
+            if (WorldSession* masterSession = master->GetSession(); masterSession && !masterSession->IsBot() && master->HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN))
             {
                 amount = 0;
                 return;
