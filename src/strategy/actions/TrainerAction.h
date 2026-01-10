@@ -8,7 +8,6 @@
 
 #include "Action.h"
 #include "ChatHelper.h"
-#include "Trainer.h"
 
 class Creature;
 class PlayerbotAI;
@@ -23,9 +22,9 @@ public:
     bool Execute(Event event) override;
 
 private:
-    typedef void (TrainerAction::*TrainerSpellAction)(uint32, const Trainer::Spell, std::ostringstream& msg);
+    typedef void (TrainerAction::*TrainerSpellAction)(uint32, TrainerSpell const*, std::ostringstream& msg);
     void Iterate(Creature* creature, TrainerSpellAction action, SpellIds& spells);
-    void Learn(uint32 cost, const Trainer::Spell tSpell, std::ostringstream& msg);
+    void Learn(uint32 cost, TrainerSpell const* tSpell, std::ostringstream& msg);
     void TellHeader(Creature* creature);
     void TellFooter(uint32 totalCost);
 };

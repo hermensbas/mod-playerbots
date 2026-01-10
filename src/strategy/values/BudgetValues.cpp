@@ -102,24 +102,35 @@ uint32 TrainCostValue::Calculate()
     {
         for (CreatureTemplateContainer::const_iterator itr = creatures->begin(); itr != creatures->end(); ++itr)
         {
-            Trainer::Trainer* trainer = sObjectMgr->GetTrainer(itr->first);
-
-            if (!trainer)
+            if (itr->second.trainer_type != TRAINER_TYPE_CLASS && itr->second.trainer_type != TRAINER_TYPE_TRADESKILLS)
                 continue;
 
-            if (trainer->GetTrainerType() != Trainer::Type::Class || !trainer->IsTrainerValidForPlayer(bot))
+            if (itr->second.trainer_type == TRAINER_TYPE_CLASS && itr->second.trainer_class != bot->getClass())
                 continue;
 
-            for (auto& spell : trainer->GetSpells())
+            TrainerSpellData const* trainer_spells = sObjectMgr->GetNpcTrainerSpells(itr->first);
+            if (!trainer_spells)
+                continue;
+
+            for (TrainerSpellMap::const_iterator iter = trainer_spells->spellList.begin();
+                 iter != trainer_spells->spellList.end(); ++iter)
             {
-                if (!trainer->CanTeachSpell(bot, trainer->GetSpell(spell.SpellId)))
+                TrainerSpell const* tSpell = &iter->second;
+                if (!tSpell)
                     continue;
 
-                if (spells.find(spell.SpellId) != spells.end())
+                TrainerSpellState state = bot->GetTrainerSpellState(tSpell);
+                if (state != TRAINER_SPELL_GREEN)
                     continue;
 
-                TotalCost += spell.MoneyCost;
-                spells.insert(spell.SpellId);
+                if (itr->second.trainer_type == TRAINER_TYPE_TRADESKILLS)
+                    continue;
+
+                if (spells.find(tSpell->spell) != spells.end())
+                    continue;
+
+                TotalCost += tSpell->spellCost;
+                spells.insert(tSpell->spell);
             }
         }
     }
