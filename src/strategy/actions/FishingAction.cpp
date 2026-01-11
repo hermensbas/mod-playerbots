@@ -417,8 +417,7 @@ bool FishingAction::Execute(Event event)
     {
         float angle = bot->GetAngle(pos.GetPositionX(), pos.GetPositionY());
         bot->SetOrientation(angle);
-        if (!bot->IsRooted())
-            bot->SendMovementFlagUpdate();
+        bot->SendMovementFlagUpdate();
     }
 
     EquipFishingPoleAction equipAction(botAI);
