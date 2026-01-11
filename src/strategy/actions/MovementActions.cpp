@@ -946,37 +946,25 @@ bool MovementAction::IsWaitingForLastMove(MovementPriority priority)
 
 bool MovementAction::IsMovingAllowed()
 {
-    // Most common checks: confused, stunned, fleeing, jumping, charging. All these
-    // states are set when handling certain aura effects. We don't check against
-    // UNIT_STATE_ROOT here, because this state is used by vehicles.
-    if (bot->HasUnitState(UNIT_STATE_LOST_CONTROL))
+    // do not allow if not vehicle driver
+    if (botAI->IsInVehicle() && !botAI->IsInVehicle(true))
         return false;
 
-    // Death state (w/o spirit release) and Spirit of Redemption aura (priest)
-    if ((bot->isDead() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) || bot->HasSpiritOfRedemptionAura())
+    if (bot->isFrozen() || bot->IsPolymorphed() || (bot->isDead() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) ||
+        bot->IsBeingTeleported() || bot->HasRootAura() || bot->HasSpiritOfRedemptionAura() || bot->HasConfuseAura() ||
+        bot->IsCharmed() || bot->HasStunAura() || bot->IsInFlight() || bot->HasUnitState(UNIT_STATE_LOST_CONTROL))
         return false;
 
-    // Common CC effects, ordered by frequency: rooted > frozen > polymorphed
-    if (bot->IsRooted() || bot->isFrozen() || bot->IsPolymorphed())
-        return false;
-
-    // Check for the MM controlled slot types: feared, confused, fleeing, etc.
     if (bot->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_CONTROLLED) != NULL_MOTION_TYPE)
+    {
         return false;
+    }
 
-    // Traveling state: taxi flight and being teleported (relatively rare)
-    if (bot->IsInFlight() || bot->GetMotionMaster()->GetCurrentMovementGeneratorType() == FLIGHT_MOTION_TYPE ||
-        bot->IsBeingTeleported())
-        return false;
-
-    // Vehicle state: is in the vehicle and can control it (rare, content-specific).
-    // We need to check charmed state AFTER vehicle one, cuz that's how it works:
-    // passengers are set to charmed by vehicle with CHARM_TYPE_VEHICLE.
-    if ((bot->HasUnitMovementFlag(MOVEMENTFLAG_ONTRANSPORT) && !botAI->IsInVehicle(true)) ||
-        bot->IsCharmed())
-        return false;
-
-    return true;
+    // if (bot->HasUnitMovementFlag(MOVEMENTFLAG_FALLING))
+    // {
+    //     return false;
+    // }
+    return bot->GetMotionMaster()->GetCurrentMovementGeneratorType() != FLIGHT_MOTION_TYPE;
 }
 
 bool MovementAction::Follow(Unit* target, float distance) { return Follow(target, distance, GetFollowAngle()); }
@@ -984,10 +972,12 @@ bool MovementAction::Follow(Unit* target, float distance) { return Follow(target
 void MovementAction::UpdateMovementState()
 {
     const bool isCurrentlyRestricted = // see if the bot is currently slowed, rooted, or otherwise unable to move
-        bot->HasUnitState(UNIT_STATE_LOST_CONTROL) ||
-        bot->IsRooted() ||
         bot->isFrozen() ||
-        bot->IsPolymorphed();
+        bot->IsPolymorphed() ||
+        bot->HasRootAura() ||
+        bot->HasStunAura() ||
+        bot->HasConfuseAura() ||
+        bot->HasUnitState(UNIT_STATE_LOST_CONTROL);
 
     // no update movement flags while movement is current restricted.
     if (!isCurrentlyRestricted && bot->IsAlive())
