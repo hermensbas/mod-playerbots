@@ -5932,38 +5932,16 @@ int32 PlayerbotAI::GetNearGroupMemberCount(float dis)
 
 bool PlayerbotAI::CanMove()
 {
-    // Most common checks: confused, stunned, fleeing, jumping, charging. All these
-    // states are set when handling certain aura effects. We don't check against
-    // UNIT_STATE_ROOT here, because this state is used by vehicles.
-    if (bot->HasUnitState(UNIT_STATE_LOST_CONTROL))
+    // do not allow if not vehicle driver
+    if (IsInVehicle() && !IsInVehicle(true))
         return false;
 
-    // Death state (w/o spirit release) and Spirit of Redemption aura (priest)
-    if ((bot->isDead() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) || bot->HasSpiritOfRedemptionAura())
+    if (bot->isFrozen() || bot->IsPolymorphed() || (bot->isDead() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) ||
+        bot->IsBeingTeleported() || bot->HasRootAura() || bot->HasSpiritOfRedemptionAura() || bot->HasConfuseAura() ||
+        bot->IsCharmed() || bot->HasStunAura() || bot->IsInFlight() || bot->HasUnitState(UNIT_STATE_LOST_CONTROL))
         return false;
 
-    // Common CC effects, ordered by frequency: rooted > charmed > frozen > polymorphed.
-    // NOTE: Can't find proper way to check if bot is rooted or charmed w/o additional
-    // vehicle check -- when a passenger is added, they become rooted and charmed.
-    if (!bot->GetVehicle() && (bot->IsRooted() || bot->IsCharmed()))
-        return false;
-    if (bot->isFrozen() || bot->IsPolymorphed())
-        return false;
-
-    // Check for the MM controlled slot types: feared, confused, fleeing, etc.
-    if (bot->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_CONTROLLED) != NULL_MOTION_TYPE)
-        return false;
-
-    // Traveling state: taxi flight and being teleported (relatively rare)
-    if (bot->IsInFlight() || bot->GetMotionMaster()->GetCurrentMovementGeneratorType() == FLIGHT_MOTION_TYPE ||
-        bot->IsBeingTeleported())
-        return false;
-
-    // Vehicle state: is in the vehicle and can control it (rare, content-specific)
-    if ((bot->GetVehicle() && !IsInVehicle(true)))
-        return false;
-
-    return true;
+    return bot->GetMotionMaster()->GetCurrentMovementGeneratorType() != FLIGHT_MOTION_TYPE;
 }
 
 bool PlayerbotAI::IsInRealGuild()
