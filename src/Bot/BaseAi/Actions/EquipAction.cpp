@@ -4,6 +4,7 @@
  */
 
 #include "EquipAction.h"
+
 #include <utility>
 
 #include "Event.h"
@@ -31,7 +32,42 @@ void EquipAction::EquipItems(ItemIds ids)
     }
 }
 
-// Return bagslot with smalest bag.
+void EquipAction::CollectUpgradeItem(Item* item, ItemIds& items, std::unordered_set<std::string>* checkedParams)
+{
+    if (!item)
+        return;
+
+    int32 randomProperty = item->GetItemRandomPropertyId();
+    uint32 itemId = item->GetTemplate()->ItemId;
+    std::string const itemUsageParam = ItemUsageValue::BuildItemUsageParam(itemId, randomProperty);
+
+    if (checkedParams && !checkedParams->insert(itemUsageParam).second)
+        return;
+
+    ItemUsage usage = AI_VALUE2(ItemUsage, "item usage", itemUsageParam);
+
+    if (usage == ITEM_USAGE_EQUIP || usage == ITEM_USAGE_REPLACE || usage == ITEM_USAGE_BAD_EQUIP)
+        items.insert(itemId);
+}
+
+void EquipAction::CollectUpgradeItems(ItemIds& items)
+{
+    CollectItemsVisitor visitor;
+    IterateItems(&visitor, ITERATE_ITEMS_IN_BAGS);
+
+    std::unordered_set<std::string> checkedParams;
+    checkedParams.reserve(visitor.items.size());
+
+    for (Item* item : visitor.items)
+    {
+        if (!item)
+            break;
+
+        CollectUpgradeItem(item, items, &checkedParams);
+    }
+}
+
+// Return bagslot with smalest bag./
 uint8 EquipAction::GetSmallestBagSlot()
 {
     int8 curBag = 0;
@@ -363,35 +399,19 @@ bool EquipUpgradesAction::Execute(Event event)
         ItemTemplate const* item = sObjectMgr->GetItemTemplate(itemId);
         if (item->Class == ITEM_CLASS_TRADE_GOODS && item->SubClass == ITEM_SUBCLASS_MEAT)
             return false;
-    }
 
-    CollectItemsVisitor visitor;
-    IterateItems(&visitor, ITERATE_ITEMS_IN_BAGS);
+        Item* const receivedItem = bot->GetItemByPos(bagSlot, itemSlot);
+        if (receivedItem)
+        {		
+            ItemIds items;
+            CollectUpgradeItem(receivedItem, items);
+            EquipItems(items);
+            return true;
+        }
+    }
 
     ItemIds items;
-    for (auto i = visitor.items.begin(); i != visitor.items.end(); ++i)
-    {
-        Item* item = *i;
-        if (!item)
-            break;
-        int32 randomProperty = item->GetItemRandomPropertyId();
-        uint32 itemId = item->GetTemplate()->ItemId;
-        std::string itemUsageParam;
-        if (randomProperty != 0)
-        {
-            itemUsageParam = std::to_string(itemId) + "," + std::to_string(randomProperty);
-        }
-        else
-        {
-            itemUsageParam = std::to_string(itemId);
-        }
-        ItemUsage usage = AI_VALUE2(ItemUsage, "item usage", itemUsageParam);
-
-        if (usage == ITEM_USAGE_EQUIP || usage == ITEM_USAGE_REPLACE || usage == ITEM_USAGE_BAD_EQUIP)
-        {
-            items.insert(itemId);
-        }
-    }
+    CollectUpgradeItems(items);
 
     EquipItems(items);
     return true;
@@ -399,33 +419,9 @@ bool EquipUpgradesAction::Execute(Event event)
 
 bool EquipUpgradeAction::Execute(Event event)
 {
-    CollectItemsVisitor visitor;
-    IterateItems(&visitor, ITERATE_ITEMS_IN_BAGS);
-
     ItemIds items;
-    for (auto i = visitor.items.begin(); i != visitor.items.end(); ++i)
-    {
-        Item* item = *i;
-        if (!item)
-            break;
-        int32 randomProperty = item->GetItemRandomPropertyId();
-        uint32 itemId = item->GetTemplate()->ItemId;
-        std::string itemUsageParam;
-        if (randomProperty != 0)
-        {
-            itemUsageParam = std::to_string(itemId) + "," + std::to_string(randomProperty);
-        }
-        else
-        {
-            itemUsageParam = std::to_string(itemId);
-        }
-        ItemUsage usage = AI_VALUE2(ItemUsage, "item usage", itemUsageParam);
 
-        if (usage == ITEM_USAGE_EQUIP || usage == ITEM_USAGE_REPLACE || usage == ITEM_USAGE_BAD_EQUIP)
-        {
-            items.insert(itemId);
-        }
-    }
+    CollectUpgradeItems(items);
 
     EquipItems(items);
     return true;

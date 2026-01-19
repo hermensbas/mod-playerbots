@@ -9,6 +9,8 @@
 #include "ChatHelper.h"
 #include "InventoryAction.h"
 
+#include <unordered_set>
+
 class FindItemVisitor;
 class Item;
 class PlayerbotAI;
@@ -20,6 +22,10 @@ public:
 
     bool Execute(Event event) override;
     void EquipItems(ItemIds ids);
+
+protected:
+    void CollectUpgradeItem(Item* item, ItemIds& items, std::unordered_set<std::string>* checkedParams = nullptr);
+    void CollectUpgradeItems(ItemIds& items);
 
 private:
     void EquipItem(FindItemVisitor* visitor);
