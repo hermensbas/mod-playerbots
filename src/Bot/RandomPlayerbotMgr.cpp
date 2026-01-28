@@ -42,7 +42,7 @@
 #include "RandomPlayerbotFactory.h"
 #include "ServerFacade.h"
 #include "SharedDefines.h"
-#include "strategy/actions/BattleGroundJoinAction.h"
+#include "Ai/Base/Actions/BattleGroundJoinAction.h"
 #include "TravelMgr.h"
 #include "Unit.h"
 #include "World.h"
