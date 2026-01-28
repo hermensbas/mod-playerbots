@@ -7,6 +7,7 @@
 
 #include <algorithm>
 
+#include <map>
 #include <cmath>
 #include <mutex>
 #include <sstream>
@@ -79,6 +80,11 @@ namespace
         sNextPermitMs = nowMs + 100;
         return true;
     }
+
+    static std::map<ObjectGuid, PlayerbotAI::LosGameObjectCacheEntry> s_sharedLosGameObjects;
+    static std::mutex s_sharedLosGameObjectsMutex;
+    static constexpr time_t LOS_SHARED_CACHE_TTL_SEC = 60;
+    static constexpr uint32 LOS_SHARED_CACHE_PRUNE_THRESHOLD = 256;
 }
 
 
@@ -148,6 +154,77 @@ char* strstri(char const* str1, char const* str2);
 std::string& trim(std::string& s);
 
 std::set<std::string> PlayerbotAI::unsecuredCommands;
+
+
+void PlayerbotAI::SetSharedLosGameObjects(ObjectGuid ownerGuid, std::vector<ObjectGuid> const& gos, Player const* source)
+{
+    if (!ownerGuid)
+        return;
+
+    LosGameObjectCacheEntry entry;
+    entry.timestamp = time(nullptr);
+    entry.gameObjects = gos;
+
+    if (source)
+    {
+        entry.hasPosition = true;
+        entry.mapId = source->GetMapId();
+        entry.x = source->GetPositionX();
+        entry.y = source->GetPositionY();
+        entry.z = source->GetPositionZ();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(s_sharedLosGameObjectsMutex);
+        s_sharedLosGameObjects[ownerGuid] = entry;
+
+        // Opportunistic prune to avoid unbounded growth if many different owners use LOS.
+        if (s_sharedLosGameObjects.size() > LOS_SHARED_CACHE_PRUNE_THRESHOLD)
+        {
+            time_t now = time(nullptr);
+            for (auto it = s_sharedLosGameObjects.begin(); it != s_sharedLosGameObjects.end();)
+            {
+                time_t ts = it->second.timestamp;
+                if (ts == 0 || now - ts > LOS_SHARED_CACHE_TTL_SEC)
+                    it = s_sharedLosGameObjects.erase(it);
+                else
+                    ++it;
+            }
+        }
+    }
+}
+
+bool PlayerbotAI::GetSharedLosGameObjects(ObjectGuid ownerGuid, LosGameObjectCacheEntry& outEntry)
+{
+    if (!ownerGuid)
+        return false;
+
+    std::lock_guard<std::mutex> lock(s_sharedLosGameObjectsMutex);
+
+    auto it = s_sharedLosGameObjects.find(ownerGuid);
+    if (it == s_sharedLosGameObjects.end())
+        return false;
+
+    time_t now = time(nullptr);
+    time_t ts = it->second.timestamp;
+    if (ts == 0 || now - ts > LOS_SHARED_CACHE_TTL_SEC)
+    {
+        s_sharedLosGameObjects.erase(it);
+        return false;
+    }
+
+    outEntry = it->second;
+    return true;
+}
+
+void PlayerbotAI::ClearSharedLosGameObjects(ObjectGuid ownerGuid)
+{
+    if (!ownerGuid)
+        return;
+
+    std::lock_guard<std::mutex> lock(s_sharedLosGameObjectsMutex);
+    s_sharedLosGameObjects.erase(ownerGuid);
+}
 
 PlayerbotChatHandler::PlayerbotChatHandler(Player* pMasterPlayer) : ChatHandler(pMasterPlayer->GetSession()) {}
 

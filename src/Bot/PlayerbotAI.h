@@ -9,6 +9,11 @@
 #include <array>
 #include <queue>
 #include <stack>
+#include <ctime>
+#include <map>
+#include <vector>
+
+#include "ObjectGuid.h"
 
 #include "Chat.h"
 #include "ChatFilter.h"
@@ -388,6 +393,24 @@ public:
     PlayerbotAI();
     PlayerbotAI(Player* bot);
     virtual ~PlayerbotAI();
+
+
+    struct LosGameObjectCacheEntry
+    {
+        time_t timestamp = 0;
+        uint32 mapId = 0;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        bool hasPosition = false;
+        std::vector<ObjectGuid> gameObjects;
+    };
+
+    // Shared cache for numeric selection from the last "los gos" list.
+    // This is keyed by the command owner GUID, so all bots in the group can use: "u 1", "u 2", ...
+    static void SetSharedLosGameObjects(ObjectGuid ownerGuid, std::vector<ObjectGuid> const& gos, Player const* source);
+    static bool GetSharedLosGameObjects(ObjectGuid ownerGuid, LosGameObjectCacheEntry& outEntry);
+    static void ClearSharedLosGameObjects(ObjectGuid ownerGuid);
 
     void UpdateAI(uint32 elapsed, bool minimal = false) override;
     void UpdateAIInternal(uint32 elapsed, bool minimal = false) override;
