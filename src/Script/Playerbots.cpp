@@ -485,6 +485,7 @@ public:
 
     void OnPlayerbotUpdate(uint32 diff) override
     {
+        PlayerbotHolder::UpdateInitQueue(diff);
         sRandomPlayerbotMgr.UpdateSessions();  // Per-bot updates only
     }
 
