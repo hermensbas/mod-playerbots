@@ -20,6 +20,24 @@
 #include "StatsCollector.h"
 #include "Unit.h"
 
+namespace
+{
+    inline bool IsHeirloomLike(ItemTemplate const* proto)
+    {
+        if (!proto)
+            return false;
+
+        // Official heirloom quality OR scaling-stat items (some DBs do not flag quality correctly).
+        if (proto->Quality == ITEM_QUALITY_HEIRLOOM)
+            return true;
+
+        if (proto->ScalingStatDistribution)
+            return true;
+
+        return false;
+    }
+}
+
 StatsWeightCalculator::StatsWeightCalculator(Player* player) : player_(player)
 {
     if (PlayerbotAI::IsHeal(player))
@@ -93,17 +111,21 @@ float StatsWeightCalculator::CalculateItem(uint32 itemId, int32 randomPropertyId
 
     if (enable_quality_blend_)
     {
-        // Heirloom items scale with player level
-        // Use player level as effective item level for heirlooms - Quality EPIC
-        // Else - Blend with item quality and level for normal items
-        if (proto->Quality == ITEM_QUALITY_HEIRLOOM)
+        // Heirloom/scaling items should scale with player level while leveling
+        if (IsHeirloomLike(proto))
             weight_ *= PlayerbotFactory::CalcMixedGearScore(lvl, ITEM_QUALITY_EPIC);
         else
             weight_ *= PlayerbotFactory::CalcMixedGearScore(proto->ItemLevel, proto->Quality);
-
-        return weight_;
     }
-    // If quality/level blending is disabled, also return the calculated weight.
+
+    // While leveling, treat heirlooms as best-in-slot so bots never downgrade them because template ItemLevel is 1.
+    if (IsHeirloomLike(proto) && lvl < DEFAULT_MAX_LEVEL)
+    {
+        constexpr float kHeirloomScoreFloorPreMaxLevel = 1.0e9f;
+        if (weight_ < kHeirloomScoreFloorPreMaxLevel)
+            weight_ = kHeirloomScoreFloorPreMaxLevel;
+    }
+
     return weight_;
 }
 

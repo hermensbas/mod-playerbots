@@ -106,6 +106,11 @@ ItemUsage ItemUsageValue::Calculate()
     if (equip != ITEM_USAGE_NONE)
         return equip;
 
+    // Heirloom/scaling items: never sell/disenchant while leveling (they should stay equipped / kept).
+    if ((proto->Quality == ITEM_QUALITY_HEIRLOOM || proto->ScalingStatDistribution != 0) &&
+        bot->GetLevel() < DEFAULT_MAX_LEVEL)
+        return ITEM_USAGE_KEEP;
+
     // Get item instance to check if it's soulbound
     Item* item = bot->GetItemByEntry(proto->ItemId);
     bool isSoulbound = item && item->IsSoulBound();

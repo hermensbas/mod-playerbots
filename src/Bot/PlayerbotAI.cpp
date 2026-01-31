@@ -5900,8 +5900,18 @@ void PlayerbotAI::_fillGearScoreData(Player* player, Item* item, std::vector<uin
         return;
 
     uint8 type = proto->InventoryType;
-    uint32 level = mixed ? proto->ItemLevel * PlayerbotAI::GetItemScoreMultiplier(ItemQualities(proto->Quality))
-                         : proto->ItemLevel;
+    uint32 effectiveItemLevel = proto->ItemLevel;
+    bool isHeirloomLike = (proto->Quality == ITEM_QUALITY_HEIRLOOM) || (proto->ScalingStatDistribution != 0);
+    if (isHeirloomLike && player->GetLevel() < DEFAULT_MAX_LEVEL)
+        effectiveItemLevel = player->GetLevel();
+
+    uint32 effectiveQuality = proto->Quality;
+    if (isHeirloomLike)
+        effectiveQuality = ITEM_QUALITY_EPIC;
+
+    uint32 level = mixed
+                       ? effectiveItemLevel * PlayerbotAI::GetItemScoreMultiplier(ItemQualities(effectiveQuality))
+                       : effectiveItemLevel;
 
     switch (type)
     {
@@ -7516,6 +7526,10 @@ float PlayerbotAI::GetItemScoreMultiplier(ItemQualities quality)
             return 1.331f;
             break;
         case ITEM_QUALITY_EPIC:
+            return 1.4641f;
+            break;
+        case ITEM_QUALITY_HEIRLOOM:
+            // Treat heirlooms as EPIC for scoring multipliers
             return 1.4641f;
             break;
         case ITEM_QUALITY_LEGENDARY:
