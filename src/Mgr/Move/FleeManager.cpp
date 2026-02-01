@@ -18,7 +18,7 @@ FleeManager::FleeManager(Player* bot, float maxAllowedDistance, float followAngl
 {
 }
 
-void FleeManager::calculateDistanceToCreatures(FleePoint* point)
+void FleeManager::calculateDistanceToCreatures(FleePoint* point, GuidVector const& units)
 {
     point->minDistance = -1.0f;
     point->sumDistance = 0.0f;
@@ -27,10 +27,9 @@ void FleeManager::calculateDistanceToCreatures(FleePoint* point)
     {
         return;
     }
-    GuidVector units = *botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los");
-    for (GuidVector::iterator i = units.begin(); i != units.end(); ++i)
+    for (ObjectGuid const& guid : units)
     {
-        Unit* unit = botAI->GetUnit(*i);
+        Unit* unit = botAI->GetUnit(guid);
         if (!unit)
             continue;
 
@@ -66,14 +65,16 @@ void FleeManager::calculatePossibleDestinations(std::vector<FleePoint*>& points)
     float botPosY = startPosition.getY();
     float botPosZ = startPosition.getZ();
 
+    GuidVector units = *botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los");
+
     FleePoint start(botAI, botPosX, botPosY, botPosZ);
-    calculateDistanceToCreatures(&start);
+    calculateDistanceToCreatures(&start, units);
 
     std::vector<float> enemyOri;
-    GuidVector units = *botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los");
-    for (GuidVector::iterator i = units.begin(); i != units.end(); ++i)
+    enemyOri.reserve(units.size());
+    for (ObjectGuid const& guid : units)
     {
-        Unit* unit = botAI->GetUnit(*i);
+        Unit* unit = botAI->GetUnit(guid);
         if (!unit)
             continue;
 
@@ -111,7 +112,7 @@ void FleeManager::calculatePossibleDestinations(std::vector<FleePoint*>& points)
                     continue;
 
                 FleePoint* point = new FleePoint(botAI, x, y, z);
-                calculateDistanceToCreatures(point);
+                calculateDistanceToCreatures(point, units);
 
                 if (ServerFacade::instance().IsDistanceGreaterOrEqualThan(point->minDistance - start.minDistance,
                                                                 sPlayerbotAIConfig.followDistance))
@@ -179,9 +180,9 @@ bool FleeManager::isUseful()
         return false;
     }
     GuidVector units = *botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los");
-    for (GuidVector::iterator i = units.begin(); i != units.end(); ++i)
+    for (ObjectGuid const& guid : units)
     {
-        Creature* creature = botAI->GetCreature(*i);
+        Creature* creature = botAI->GetCreature(guid);
         if (!creature)
             continue;
 

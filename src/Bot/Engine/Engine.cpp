@@ -166,7 +166,7 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
         bool skipPrerequisites = basket->isSkipPrerequisites();
 
         if (minimal && (relevance < 100))
-            continue;
+            break;  // Queue is max-relevance; nothing else will meet the minimal threshold.
 
         Event event = basket->getEvent();
         ActionNode* actionNode = queue.Pop();  // NOTE: Pop() deletes basket
