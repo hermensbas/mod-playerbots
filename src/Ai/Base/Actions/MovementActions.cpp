@@ -1464,7 +1464,7 @@ bool MovementAction::Flee(Unit* target)
                     float distanceToTarget = ServerFacade::instance().GetDistance2d(player, target);
                     if (distanceToHealer < fleeDistance &&
                         distanceToTarget > (botAI->GetRange("shoot") / 2 + sPlayerbotAIConfig.followDistance) &&
-                        (needHealer || player->IsWithinLOSInMap(target)))
+                        (needHealer || ServerFacade::instance().IsWithinLOSInMap(player, target)))
                     {
                         fleeTarget = player;
                         fleeDistance = distanceToHealer;
@@ -1477,7 +1477,7 @@ bool MovementAction::Flee(Unit* target)
                     float distanceToTarget = ServerFacade::instance().GetDistance2d(player, target);
                     if (distanceToRanged < fleeDistance &&
                         distanceToTarget > (botAI->GetRange("shoot") / 2 + sPlayerbotAIConfig.followDistance) &&
-                        player->IsWithinLOSInMap(target))
+                        ServerFacade::instance().IsWithinLOSInMap(player, target))
                     {
                         fleeTarget = player;
                         fleeDistance = distanceToRanged;
@@ -1489,7 +1489,7 @@ bool MovementAction::Flee(Unit* target)
                 float distanceToTarget = ServerFacade::instance().GetDistance2d(player, target);
                 if (distanceToFlee < spareDistance &&
                     distanceToTarget > (botAI->GetRange("shoot") / 2 + sPlayerbotAIConfig.followDistance) &&
-                    player->IsWithinLOSInMap(target))
+                    ServerFacade::instance().IsWithinLOSInMap(player, target))
                 {
                     spareTarget = player;
                     spareDistance = distanceToFlee;
@@ -1506,7 +1506,7 @@ bool MovementAction::Flee(Unit* target)
             if (fleeTarget)
                 foundFlee = MoveNear(fleeTarget);
 
-            if ((!fleeTarget || !foundFlee) && master && master->IsAlive() && master->IsWithinLOSInMap(target))
+            if ((!fleeTarget || !foundFlee) && master && master->IsAlive() && sServerFacade->IsWithinLOSInMap(master, target))
             {
                 float distanceToTarget = ServerFacade::instance().GetDistance2d(master, target);
                 if (distanceToTarget > (botAI->GetRange("shoot") / 2 + sPlayerbotAIConfig.followDistance))

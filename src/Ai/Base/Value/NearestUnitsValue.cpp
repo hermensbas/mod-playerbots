@@ -6,6 +6,7 @@
 #include "NearestUnitsValue.h"
 
 #include "Playerbots.h"
+#include "ServerFacade.h"
 
 GuidVector NearestUnitsValue::Calculate()
 {
@@ -15,7 +16,7 @@ GuidVector NearestUnitsValue::Calculate()
     GuidVector results;
     for (Unit* unit : targets)
     {
-        if (AcceptUnit(unit) && (ignoreLos || bot->IsWithinLOSInMap(unit)))
+        if (AcceptUnit(unit) && (ignoreLos || sServerFacade->IsWithinLOSInMap(bot, unit)))
             results.push_back(unit->GetGUID());
     }
 

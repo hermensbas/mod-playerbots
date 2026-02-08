@@ -4289,7 +4289,7 @@ bool ArenaTactics::Execute(Event event)
     Unit* target = bot->GetVictim();
     if (target)
     {
-        bool losBlocked = !bot->IsWithinLOSInMap(target) || fabs(bot->GetPositionZ() - target->GetPositionZ()) > 5.0f;
+        bool losBlocked = !sServerFacade->IsWithinLOSInMap(bot, target) || fabs(bot->GetPositionZ() - target->GetPositionZ()) > 5.0f;
 
         if (losBlocked)
         {

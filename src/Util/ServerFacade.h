@@ -120,6 +120,15 @@ public:
      * @param packet Packet to send.
      */
     void SendPacket(Player* player, WorldPacket* packet);
+
+    /**
+     * @brief Check line of sight between two world objects with playerbot-specific overrides.
+     *
+     * @param viewer Source object (usually a player bot).
+     * @param target Target object.
+     * @return true if LOS passes, false if blocked or overridden.
+     */
+    bool IsWithinLOSInMap(WorldObject* viewer, WorldObject* target);
 };
 
 #endif
