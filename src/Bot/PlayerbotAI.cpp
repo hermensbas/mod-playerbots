@@ -383,7 +383,7 @@ void PlayerbotAI::SetMaster(Player* newMaster)
 
     // Maintain fast master->controlled random/addclass bots index so real players without bots
     // do not pay O(N_random_bots) cost on each outgoing packet.
-    if (bot && (sRandomPlayerbotMgr->IsRandomBot(bot) || sRandomPlayerbotMgr->IsAddclassBot(bot)))
+    if (bot && (sRandomPlayerbotMgr.IsRandomBot(bot) || sRandomPlayerbotMgr.IsAddclassBot(bot)))
     {
         ObjectGuid botGuid = bot->GetGUID();
 
@@ -403,7 +403,7 @@ void PlayerbotAI::SetMaster(Player* newMaster)
                 newMasterGuid = newMaster->GetGUID();
         }
 
-        sRandomPlayerbotMgr->OnRandomBotMasterChanged(botGuid, oldMasterGuid, newMasterGuid);
+        sRandomPlayerbotMgr.OnRandomBotMasterChanged(botGuid, oldMasterGuid, newMasterGuid);
     }
 }
 
@@ -490,14 +490,14 @@ void PlayerbotAI::OnPvpGearEquipped(uint32 instanceId)
 
 bool PlayerbotAI::IsWildRandomBotForAutoGearSwap() const
 {
-    if (!bot || !sRandomPlayerbotMgr)
+    if (!bot)
         return false;
 
-    if (!sRandomPlayerbotMgr->IsRandomBot(bot))
+    if (!sRandomPlayerbotMgr.IsRandomBot(bot))
         return false;
 
     // Addclass (summoned) bots must never auto-stash/auto-swap.
-    if (sRandomPlayerbotMgr->IsAddclassBot(bot))
+    if (sRandomPlayerbotMgr.IsAddclassBot(bot))
         return false;
 
     // Player-controlled or group-master bots are handled by the player.
@@ -975,7 +975,7 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
     if (pendingPveGearReequipEpoch_ > donePveGearReequipEpoch_)
     {
         // Safety: if this isn't a random bot, just finalize the pending epoch.
-        if (!sRandomPlayerbotMgr || !sRandomPlayerbotMgr->IsRandomBot(bot))
+        if (!sRandomPlayerbotMgr.IsRandomBot(bot))
         {
             donePveGearReequipEpoch_ = pendingPveGearReequipEpoch_;
             pendingPveGearReequipHadRealMaster_ = false;
@@ -1031,10 +1031,10 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
                         }
                         else
                         {
-                            uint32 qualityLimit = pendingPveGearReequipHadRealMaster_ ? sPlayerbotAIConfig->autoGearQualityLimit
-                                                                                     : sPlayerbotAIConfig->randomGearQualityLimit;
-                            uint32 scoreLimit = pendingPveGearReequipHadRealMaster_ ? sPlayerbotAIConfig->autoGearScoreLimit
-                                                                                    : sPlayerbotAIConfig->randomGearScoreLimit;
+                            uint32 qualityLimit = pendingPveGearReequipHadRealMaster_ ? sPlayerbotAIConfig.autoGearQualityLimit
+                                                                                     : sPlayerbotAIConfig.randomGearQualityLimit;
+                            uint32 scoreLimit = pendingPveGearReequipHadRealMaster_ ? sPlayerbotAIConfig.autoGearScoreLimit
+                                                                                    : sPlayerbotAIConfig.randomGearScoreLimit;
                             uint32 gs = scoreLimit == 0 ? 0 : PlayerbotFactory::CalcMixedGearScore(scoreLimit, qualityLimit);
 
                             uint8 savedLevel = bot->GetLevel();
@@ -1044,7 +1044,7 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
                             factory.InitEquipment(false, true);
 
                             // Apply enchants/gems only.
-                            if (savedLevel >= sPlayerbotAIConfig->minEnchantingBotLevel)
+                            if (savedLevel >= sPlayerbotAIConfig.minEnchantingBotLevel)
                                 factory.ApplyEnchantAndGemsNew();
 
                             PurgeResilienceItemsFromBankAndBags(500);
@@ -1079,16 +1079,16 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
                     postRestartPveRecoveryDone_ = true;
                     postRestartPveRecoveryNextTryMs_ = 0;
                 }
-                else if (sRandomPlayerbotMgr && TryAcquirePveReequipPermitLocal())
+                else if (TryAcquirePveReequipPermitLocal())
                 {
-                    uint32 qualityLimit = sPlayerbotAIConfig->randomGearQualityLimit;
-                    uint32 scoreLimit = sPlayerbotAIConfig->randomGearScoreLimit;
+                    uint32 qualityLimit = sPlayerbotAIConfig.randomGearQualityLimit;
+                    uint32 scoreLimit = sPlayerbotAIConfig.randomGearScoreLimit;
                     uint32 gs = scoreLimit == 0 ? 0 : PlayerbotFactory::CalcMixedGearScore(scoreLimit, qualityLimit);
 
                     uint8 savedLevel = bot->GetLevel();
                     PlayerbotFactory factory(bot, savedLevel, qualityLimit, gs, true);
                     factory.InitEquipment(false, true);
-                    if (savedLevel >= sPlayerbotAIConfig->minEnchantingBotLevel)
+                    if (savedLevel >= sPlayerbotAIConfig.minEnchantingBotLevel)
                         factory.ApplyEnchantAndGemsNew();
 
                     PurgeResilienceItemsFromBankAndBags(500);
@@ -1138,7 +1138,7 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
         // Use a small deterministic per-bot jitter so behavior stays stable while updates are spread over time.
         if (bot && (bot->IsInCombat() || bot->InBattleground() || bot->InArena() || currentState == BOT_STATE_COMBAT))
         {
-            uint32 jitterMax = std::min<uint32>(50u, std::max<uint32>(10u, sPlayerbotAIConfig->reactDelay / 2));
+            uint32 jitterMax = std::min<uint32>(50u, std::max<uint32>(10u, sPlayerbotAIConfig.reactDelay / 2));
             if (jitterMax)
                 delay += bot->GetGUID().GetCounter() % jitterMax;
         }

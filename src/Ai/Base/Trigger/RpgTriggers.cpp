@@ -362,7 +362,7 @@ bool RpgTradeUsefulTrigger::IsActive()
     if (!isFriend)
         return false;
 
-    if (!sServerFacade->IsWithinLOSInMap(player, bot))
+    if (!ServerFacade::instance().IsWithinLOSInMap(player, bot))
         return false;
 
     if (player->GetTrader() && player->GetTrader() != bot)

@@ -16,7 +16,7 @@ GuidVector NearestUnitsValue::Calculate()
     GuidVector results;
     for (Unit* unit : targets)
     {
-        if (AcceptUnit(unit) && (ignoreLos || sServerFacade->IsWithinLOSInMap(bot, unit)))
+        if (AcceptUnit(unit) && (ignoreLos || ServerFacade::instance().IsWithinLOSInMap(bot, unit)))
             results.push_back(unit->GetGUID());
     }
 

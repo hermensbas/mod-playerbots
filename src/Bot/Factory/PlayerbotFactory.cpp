@@ -4087,7 +4087,7 @@ void PlayerbotFactory::InitArenaTeam()
         return;
 
     // Safety: only random bots should ever get random-bot arena teams.
-    if (!sRandomPlayerbotMgr || !sRandomPlayerbotMgr->IsRandomBot(bot))
+    if (!sRandomPlayerbotMgr.IsRandomBot(bot))
         return;
 
     uint32 maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);

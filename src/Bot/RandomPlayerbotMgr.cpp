@@ -624,11 +624,11 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
     // --- Begin: original full-tick setup (without doing the heavy loops) ---
     uint32 maxAllowedBotCount = GetEventValue(0, "bot_count");
     if (!maxAllowedBotCount ||
-        (maxAllowedBotCount < sPlayerbotAIConfig->minRandomBots || maxAllowedBotCount > sPlayerbotAIConfig->maxRandomBots))
+        (maxAllowedBotCount < sPlayerbotAIConfig.minRandomBots || maxAllowedBotCount > sPlayerbotAIConfig.maxRandomBots))
     {
-        maxAllowedBotCount = urand(sPlayerbotAIConfig->minRandomBots, sPlayerbotAIConfig->maxRandomBots);
+        maxAllowedBotCount = urand(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots);
         SetEventValue(0, "bot_count", maxAllowedBotCount,
-            urand(sPlayerbotAIConfig->randomBotCountChangeMinInterval, sPlayerbotAIConfig->randomBotCountChangeMaxInterval));
+            urand(sPlayerbotAIConfig.randomBotCountChangeMinInterval, sPlayerbotAIConfig.randomBotCountChangeMaxInterval));
     }
 
     GetBots();
@@ -642,17 +642,17 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
     uint32 onlineBotCount = static_cast<uint32>(playerBots.size());
 
     uint32 onlineBotFocus = 75;
-    if (onlineBotCount < (uint32)(sPlayerbotAIConfig->minRandomBots * 90 / 100))
+    if (onlineBotCount < (uint32)(sPlayerbotAIConfig.minRandomBots * 90 / 100))
         onlineBotFocus = 25;
 
     // Only keep updating till initializing time has completed,
     // which prevents unneeded expensive GameTime calls.
     if (_isBotInitializing)
     {
-        _isBotInitializing = GameTime::GetUptime().count() < sPlayerbotAIConfig->maxRandomBots * (0.11 + 0.4);
+        _isBotInitializing = GameTime::GetUptime().count() < sPlayerbotAIConfig.maxRandomBots * (0.11 + 0.4);
     }
 
-    uint32 updateIntervalTurboBoost = _isBotInitializing ? 1 : sPlayerbotAIConfig->randomBotUpdateInterval;
+    uint32 updateIntervalTurboBoost = _isBotInitializing ? 1 : sPlayerbotAIConfig.randomBotUpdateInterval;
     _slicedLogicalIntervalMs = updateIntervalTurboBoost * (onlineBotFocus + 25) * 10;
     if (_slicedLogicalIntervalMs == 0)
         _slicedLogicalIntervalMs = 1;
@@ -660,7 +660,7 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
     time_t now = time(nullptr);
 
     bool realPlayerIsLogged = false;
-    if (sPlayerbotAIConfig->disabledWithoutRealPlayer)
+    if (sPlayerbotAIConfig.disabledWithoutRealPlayer)
     {
         if (sWorldSessionMgr->GetActiveAndQueuedSessionCount() > 0)
         {
@@ -668,7 +668,7 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
             realPlayerIsLogged = true;
 
             if (DelayLoginBotsTimer == 0)
-                DelayLoginBotsTimer = now + sPlayerbotAIConfig->disabledWithoutRealPlayerLoginDelay;
+                DelayLoginBotsTimer = now + sPlayerbotAIConfig.disabledWithoutRealPlayerLoginDelay;
         }
         else
         {
@@ -676,7 +676,7 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
                 DelayLoginBotsTimer = 0;
 
             if (RealPlayerLastTimeSeen != 0 && onlineBotCount > 0 &&
-                now > RealPlayerLastTimeSeen + sPlayerbotAIConfig->disabledWithoutRealPlayerLogoutDelay)
+                now > RealPlayerLastTimeSeen + sPlayerbotAIConfig.disabledWithoutRealPlayerLogoutDelay)
             {
                 LogoutAllBots();
                 LOG_INFO("playerbots", "Logout all bots due no real player session.");
@@ -684,7 +684,7 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
         }
 
         if (availableBotCount < maxAllowedBotCount &&
-            (sPlayerbotAIConfig->disabledWithoutRealPlayer == false ||
+            (sPlayerbotAIConfig.disabledWithoutRealPlayer == false ||
              (realPlayerIsLogged && DelayLoginBotsTimer != 0 && now >= DelayLoginBotsTimer)))
         {
             AddRandomBots();
@@ -696,42 +696,42 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
     }
 
     // Mirror periodic checks from the original code path (run at most once per logical tick).
-    if (sPlayerbotAIConfig->syncLevelWithPlayers && !players.empty())
+    if (sPlayerbotAIConfig.syncLevelWithPlayers && !players.empty())
     {
         if (now > (PlayersCheckTimer + 60))
-            sRandomPlayerbotMgr->CheckPlayers();
+            sRandomPlayerbotMgr.CheckPlayers();
     }
 
-    if (sPlayerbotAIConfig->randomBotJoinBG)
+    if (sPlayerbotAIConfig.randomBotJoinBG)
     {
         if (now > (BgCheckTimer + 35))
-            sRandomPlayerbotMgr->CheckBgQueue();
+            sRandomPlayerbotMgr.CheckBgQueue();
     }
 
-    if (sPlayerbotAIConfig->randomBotJoinLfg)
+    if (sPlayerbotAIConfig.randomBotJoinLfg)
     {
         if (now > (LfgCheckTimer + 30))
-            sRandomPlayerbotMgr->CheckLfgQueue();
+            sRandomPlayerbotMgr.CheckLfgQueue();
     }
 
-    if (sPlayerbotAIConfig->randomBotAutologin && now > (printStatsTimer + 300))
+    if (sPlayerbotAIConfig.randomBotAutologin && now > (printStatsTimer + 300))
     {
         if (!printStatsTimer)
             printStatsTimer = now;
         else
-            sRandomPlayerbotMgr->PrintStats();
+            sRandomPlayerbotMgr.PrintStats();
     }
 
-    uint32 updateBots = sPlayerbotAIConfig->randomBotsPerInterval * onlineBotFocus / 100;
+    uint32 updateBots = sPlayerbotAIConfig.randomBotsPerInterval * onlineBotFocus / 100;
 
     uint32 maxNewBots =
         onlineBotCount < maxAllowedBotCount &&
-                (sPlayerbotAIConfig->disabledWithoutRealPlayer == false ||
+                (sPlayerbotAIConfig.disabledWithoutRealPlayer == false ||
                  (realPlayerIsLogged && DelayLoginBotsTimer != 0 && now >= DelayLoginBotsTimer))
             ? maxAllowedBotCount - onlineBotCount
             : 0;
 
-    uint32 loginBots = std::min(sPlayerbotAIConfig->randomBotsPerInterval - updateBots, maxNewBots);
+    uint32 loginBots = std::min(sPlayerbotAIConfig.randomBotsPerInterval - updateBots, maxNewBots);
 
     _slicedUpdateTarget = updateBots;
     _slicedUpdateTargetInitial = updateBots;
@@ -750,7 +750,7 @@ void RandomPlayerbotMgr::ProcessSlicedSlice()
     if (!_slicedCycleActive || _slicedLogicalIntervalMs == 0)
         return;
 
-    uint32 dtMs = _slicedDtMs ? _slicedDtMs : sPlayerbotAIConfig->randomBotSliceMs;
+    uint32 dtMs = _slicedDtMs ? _slicedDtMs : sPlayerbotAIConfig.randomBotSliceMs;
 
     switch (_slicedPhase)
     {
@@ -2511,7 +2511,7 @@ void RandomPlayerbotMgr::Init()
         sRandomPlayerbotMgr.LoadBattleMastersCache();
 
     // Build fast lookup index for creature entry -> CreatureData
-    sRandomPlayerbotMgr->BuildCreatureDataEntryIndex();
+    sRandomPlayerbotMgr.BuildCreatureDataEntryIndex();
 
     PlayerbotsDatabase.Execute("DELETE FROM playerbots_random_bots WHERE event = 'add'");
     _pendingEventWrites.clear();

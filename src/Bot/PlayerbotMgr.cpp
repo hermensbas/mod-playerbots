@@ -58,11 +58,11 @@ void ForEachControlledRandomBot(Player* master, F&& fn)
     controlledGuids.swap(tlsControlledGuids);
     controlledGuids.clear();
 
-    sRandomPlayerbotMgr->GetMasterControlledRandomBotGuidsSnapshot(master->GetGUID(), controlledGuids);
+    sRandomPlayerbotMgr.GetMasterControlledRandomBotGuidsSnapshot(master->GetGUID(), controlledGuids);
 
     for (ObjectGuid const& guid : controlledGuids)
     {
-        Player* bot = sRandomPlayerbotMgr->GetPlayerBot(guid);
+        Player* bot = sRandomPlayerbotMgr.GetPlayerBot(guid);
         if (!bot)
             continue;
 
@@ -205,7 +205,7 @@ namespace
 
             bot = ObjectAccessor::FindPlayer(request.botGuid);
             if (!bot)
-                bot = sRandomPlayerbotMgr->GetPlayerBot(request.botGuid);
+                bot = sRandomPlayerbotMgr.GetPlayerBot(request.botGuid);
 
             Player* master = ObjectAccessor::FindConnectedPlayer(request.masterGuid);
 
@@ -218,7 +218,7 @@ namespace
             }
 
             // Must still be an addclass bot.
-            if (!sRandomPlayerbotMgr->IsAddclassBot(request.botGuid.GetCounter()))
+            if (!sRandomPlayerbotMgr.IsAddclassBot(request.botGuid.GetCounter()))
             {
                 PopFrontAndCleanup(request);
                 _lastExecMs = getMSTime();
@@ -264,7 +264,7 @@ namespace
                 }
 
                 if (master->GetSession() && master->GetSession()->GetSecurity() <= SEC_PLAYER &&
-                    sPlayerbotAIConfig->autoInitOnly && effectiveCmd != "init=auto")
+                    sPlayerbotAIConfig.autoInitOnly && effectiveCmd != "init=auto")
                 {
                     // Not allowed - drop.
                     PopFrontAndCleanup(request);
@@ -328,7 +328,7 @@ namespace
             else if (cmd == "init=auto")
             {
                 uint32 mixedGearScore = PlayerbotAI::GetMixedGearScore(master, true, false, 12) *
-                                        sPlayerbotAIConfig->autoInitEquipLevelLimitRatio;
+                                        sPlayerbotAIConfig.autoInitEquipLevelLimitRatio;
 
                 // Work around: distinguish from 0 if no gear.
                 if (mixedGearScore == 0)
@@ -680,7 +680,7 @@ void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
             return;
 
         // Keep master->controlled random-bots index clean (safe no-op if not tracked).
-        sRandomPlayerbotMgr->OnRandomBotLoggedOut(guid);
+        sRandomPlayerbotMgr.OnRandomBotLoggedOut(guid);
 
         // Queue group cleanup operation for world thread
         auto cleanupOp = std::make_unique<BotLogoutGroupCleanupOperation>(guid);
@@ -779,7 +779,7 @@ void PlayerbotHolder::DisablePlayerBot(ObjectGuid guid)
             return;
         }
         // Keep master->controlled random-bots index clean (safe no-op if not tracked).
-        sRandomPlayerbotMgr->OnRandomBotLoggedOut(guid);
+        sRandomPlayerbotMgr.OnRandomBotLoggedOut(guid);
         botAI->TellMaster("Goodbye!");
         bot->StopMoving();
         bot->GetMotionMaster()->Clear();

@@ -226,7 +226,7 @@ bool CastShatteringThrowAction::isPossible()
     }
 
     // Check line of sight
-    if (!sServerFacade->IsWithinLOSInMap(bot, target))
+    if (!ServerFacade::instance().IsWithinLOSInMap(bot, target))
     {
         return false;
     }

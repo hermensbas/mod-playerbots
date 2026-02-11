@@ -112,7 +112,7 @@ bool AttackAction::Attack(Unit* target, bool /*with_pet*/ /*true*/)
         return false;
     }
 
-    if (!sServerFacade->IsWithinLOSInMap(bot, target))
+    if (!ServerFacade::instance().IsWithinLOSInMap(bot, target))
     {
         if (verbose)
             botAI->TellError(std::string(target->GetName()) + " is not in my sight.");

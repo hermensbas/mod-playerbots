@@ -542,7 +542,7 @@ bool BGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battlegroun
 
     // Wild random-bots: do not join battleground queues unless there is at least one real player queued/inside.
     // (Real players in BG still count because they remain in battleground queue.)
-    if (sRandomPlayerbotMgr && sRandomPlayerbotMgr->IsRandomBot(bot))
+    if (sRandomPlayerbotMgr.IsRandomBot(bot))
     {
         PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
         if (botAI && !botAI->HasRealPlayerMaster() && (bgAlliancePlayerCount + bgHordePlayerCount) == 0)
@@ -804,7 +804,7 @@ bool BGJoinAction::JoinQueue(uint32 type)
     {
         // Rated arenas: dynamically align random-bot arena-team rating/MMR close to real players currently queued.
         // This helps bots face opponents near the player's current bracket/skill without recreating teams.
-        if (isRated && sRandomPlayerbotMgr && sRandomPlayerbotMgr->IsRandomBot(bot) && !sRandomPlayerbotMgr->IsAddclassBot(bot))
+        if (isRated && sRandomPlayerbotMgr.IsRandomBot(bot) && !sRandomPlayerbotMgr.IsAddclassBot(bot))
         {
             uint32 target = GetQueuedRealPlayersMatchmakerTarget(queueTypeId, bracketId, arenaType);
             if (target)
@@ -905,7 +905,7 @@ bool FreeBGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battleg
 
     // Wild random-bots: do not join battleground queues unless there is at least one real player queued/inside.
     // (Real players in BG still count because they remain in battleground queue.)
-    if (sRandomPlayerbotMgr && sRandomPlayerbotMgr->IsRandomBot(bot))
+    if (sRandomPlayerbotMgr.IsRandomBot(bot))
     {
         PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
         if (botAI && !botAI->HasRealPlayerMaster() && (bgAlliancePlayerCount + bgHordePlayerCount) == 0)
@@ -1442,11 +1442,11 @@ bool BGStrategyCheckAction::Execute(Event event)
     }
 
     // Wild random bots only.
-    if (!sRandomPlayerbotMgr || !sRandomPlayerbotMgr->IsRandomBot(bot))
+    if (!sRandomPlayerbotMgr.IsRandomBot(bot))
         return false;
 
     // Addclass (summoned) bots must never auto-generate/swap PvP gear.
-    if (sRandomPlayerbotMgr->IsAddclassBot(bot))
+    if (sRandomPlayerbotMgr.IsAddclassBot(bot))
         return false;
 
     // Wait until the bot is actually on the BG/arena map (avoid swapping during transfer).
@@ -1462,8 +1462,8 @@ bool BGStrategyCheckAction::Execute(Event event)
     if (hasRealMaster)
         return false;
 
-    uint32 qualityLimit = sPlayerbotAIConfig->randomGearQualityLimit;
-    uint32 scoreLimit = sPlayerbotAIConfig->randomGearScoreLimit;
+    uint32 qualityLimit = sPlayerbotAIConfig.randomGearQualityLimit;
+    uint32 scoreLimit = sPlayerbotAIConfig.randomGearScoreLimit;
 
     uint32 gs = scoreLimit == 0 ? 0 : PlayerbotFactory::CalcMixedGearScore(scoreLimit, qualityLimit);
 
@@ -1545,7 +1545,7 @@ bool BGStrategyCheckAction::Execute(Event event)
     factory.InitEquipment(false, true);
 
     // Apply enchants/gems only.
-    if (savedLevel >= sPlayerbotAIConfig->minEnchantingBotLevel)
+    if (savedLevel >= sPlayerbotAIConfig.minEnchantingBotLevel)
         factory.ApplyEnchantAndGemsNew();
 
     // Remember that this bot already swapped gear for this BG/arena instance.
