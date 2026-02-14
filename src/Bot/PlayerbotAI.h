@@ -608,6 +608,8 @@ public:
     // Schedules a callback to run once after <delayMs> milliseconds.
     void AddTimedEvent(std::function<void()> callback, uint32 delayMs);
 
+    bool AllowAction(const std::string& name, uint32 ms);
+
 private:
     static void _fillGearScoreData(Player* player, Item* item, std::vector<uint32>* gearScore, uint32& twoHandScore,
                                    bool mixed = false);
@@ -626,6 +628,7 @@ private:
         return player && player->GetSession() && player->IsInWorld() && !player->IsDuringRemoveFromWorld() &&
                !player->IsBeingTeleported();
     }
+    std::unordered_map<std::string, uint32> actionDelays;
 protected:
     Player* bot;
     Player* master;

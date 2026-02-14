@@ -57,6 +57,9 @@ MountData CollectMountData(const Player* bot)
 
 bool CheckMountStateAction::isUseful()
 {
+    if (!botAI->AllowAction("check mount state", 500))
+        return false;
+
     // Not useful when:
     if (botAI->IsInVehicle() || bot->isDead() || bot->HasUnitState(UNIT_STATE_IN_FLIGHT) ||
         !bot->IsOutdoors() || bot->InArena())

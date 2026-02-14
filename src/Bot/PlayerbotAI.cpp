@@ -6787,6 +6787,18 @@ void PlayerbotAI::AddTimedEvent(std::function<void()> callback, uint32 delayMs)
     bot->m_Events.AddEvent(new LambdaEvent(std::move(callback)), bot->m_Events.CalculateTime(delayMs));
 }
 
+bool PlayerbotAI::AllowAction(const std::string& name, uint32 ms)
+{
+    uint32 now = getMSTime();
+
+    auto it = actionDelays.find(name);
+    if (it != actionDelays.end() && now < it->second)
+        return false;
+
+    actionDelays[name] = now + ms;
+    return true;
+}
+
 void PlayerbotAI::EvaluateHealerDpsStrategy()
 {
     if (!IsHeal(bot, true))
