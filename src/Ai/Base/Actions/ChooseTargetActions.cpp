@@ -32,6 +32,9 @@ bool AttackEnemyFlagCarrierAction::isUseful()
 
 bool AttackAnythingAction::isUseful()
 {
+    if (!botAI->AllowAction("attack anything", 300))
+        return false;
+
     if (!bot || !botAI)  // Prevents invalid accesses
         return false;
 

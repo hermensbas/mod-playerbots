@@ -408,6 +408,9 @@ bool EquipUpgradesTriggeredAction::Execute(Event event)
 
 bool EquipUpgradeAction::Execute(Event event)
 {
+    if (!botAI->AllowAction("equip upgrade", 5000))
+        return false;
+
     ItemIds items = SelectInventoryItemsToEquip();
     EquipItems(items);
     return true;

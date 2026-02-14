@@ -152,6 +152,9 @@ bool NewRpgStatusUpdateAction::Execute(Event event)
 
 bool NewRpgGoGrindAction::Execute(Event event)
 {
+    if (!ai->AllowAction("new rpg go grind", 2000))
+        return false;
+
     if (SearchQuestGiverAndAcceptOrReward())
         return true;
 
