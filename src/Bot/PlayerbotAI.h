@@ -629,6 +629,8 @@ private:
                !player->IsBeingTeleported();
     }
     std::unordered_map<std::string, uint32> actionDelays;
+    uint32 nextAllowedUpdate = 0;
+
 protected:
     Player* bot;
     Player* master;

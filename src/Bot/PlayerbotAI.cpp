@@ -238,10 +238,13 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 {
     // Handle the AI check delay
     if (nextAICheckDelay > elapsed)
+    {
         nextAICheckDelay -= elapsed;
+        return;
+    }
     else
         nextAICheckDelay = 0;
-
+  
     // Early return if bot is in invalid state
     if (!bot || !bot->GetSession() || !bot->IsInWorld() || bot->IsBeingTeleported() ||
         bot->GetSession()->isLogingOut() || bot->IsDuringRemoveFromWorld())
@@ -370,6 +373,44 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 
     // Update internal AI
     UpdateAIInternal(elapsed, minimal);
+
+     Player* bot = GetBot();
+    if (!bot || !bot->IsInWorld())
+        return;
+
+    // ----- never slow combat -----
+    if (bot->IsInCombat())
+    {
+        nextAICheckDelay = 0;
+        YieldThread(GetReactDelay());
+        return;
+    }
+
+    // ----- distance check -----
+    float minDist = FLT_MAX;
+
+    Map::PlayerList const& players = bot->GetMap()->GetPlayers();
+    for (auto const& itr : players)
+    {
+        Player* player = itr.GetSource();
+        if (!player || !player->IsInWorld())
+            continue;
+
+        if (player->IsGameMaster())
+            continue;
+
+        float d = bot->GetDistance(player);
+        if (d < minDist)
+            minDist = d;
+    }
+
+    if (minDist > 100.0f)
+        nextAICheckDelay = 1000;
+    else if (minDist > 60.0f)
+        nextAICheckDelay = 300;
+    else
+        nextAICheckDelay = 0;
+
     YieldThread(GetReactDelay());
 }
 
@@ -6790,12 +6831,12 @@ void PlayerbotAI::AddTimedEvent(std::function<void()> callback, uint32 delayMs)
 bool PlayerbotAI::AllowAction(const std::string& name, uint32 ms)
 {
     uint32 now = getMSTime();
-
     auto it = actionDelays.find(name);
     if (it != actionDelays.end() && now < it->second)
         return false;
 
     actionDelays[name] = now + ms;
+
     return true;
 }
 
