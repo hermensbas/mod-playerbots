@@ -58,8 +58,8 @@ std::vector<uint32> PlayerbotFactory::enchantSpellIdCache;
 std::vector<uint32> PlayerbotFactory::enchantGemIdCache;
 std::unordered_map<uint32, std::vector<uint32>> PlayerbotFactory::trainerIdCache;
 
-PlayerbotFactory::PlayerbotFactory(Player* bot, uint32 level, uint32 itemQuality, uint32 gearScoreLimit)
-    : level(level), itemQuality(itemQuality), gearScoreLimit(gearScoreLimit), bot(bot)
+PlayerbotFactory::PlayerbotFactory(Player* bot, uint32 level, uint32 itemQuality, uint32 gearScoreLimit, bool lockLevel)
+    : level(level), itemQuality(itemQuality), gearScoreLimit(gearScoreLimit), lockLevel(lockLevel), bot(bot)
 {
     botAI = GET_PLAYERBOT_AI(bot);
     if (!this->itemQuality)
@@ -208,11 +208,21 @@ void PlayerbotFactory::Prepare()
         bot->ResurrectPlayer(1.0f, false);
 
     bot->CombatStop(true);
-    uint32 currentLevel = bot->GetLevel();
-    bot->GiveLevel(level);
-    if (level != currentLevel)
+
+    if (!lockLevel)
     {
-        bot->SetUInt32Value(PLAYER_XP, 0);
+        uint32 currentLevel = bot->GetLevel();
+        bot->GiveLevel(level);
+        if (level != currentLevel)
+        {
+            bot->SetUInt32Value(PLAYER_XP, 0);
+        }
+    }
+    else
+    {
+        // This factory instance must not touch bot level/XP.
+        // Keep internal target level consistent with actual bot level.
+        level = bot->GetLevel();
     }
     if (!sPlayerbotAIConfig.randomBotShowHelmet || !urand(0, 4))
     {
@@ -253,7 +263,11 @@ void PlayerbotFactory::Randomize(bool incremental)
     bot->RemoveAllSpellCooldown();
     UnbindInstance();
 
-    bot->GiveLevel(level);
+    if (!lockLevel)
+        bot->GiveLevel(level);
+    else
+        level = bot->GetLevel();
+
     bot->InitStatsForLevel(true);
     CancelAuras();
     // bot->SaveToDB(false, false);
@@ -446,14 +460,17 @@ void PlayerbotFactory::Randomize(bool incremental)
     // bot->SaveToDB(false, false);
     if (pmo)
         pmo->finish();
-
-    if (bot->GetLevel() >= 70)
     {
-        pmo = sPerfMonitor.start(PERF_MON_RNDBOT, "PlayerbotFactory_Arenas");
-        // LOG_INFO("playerbots", "Initializing arena teams...");
-        InitArenaTeam();
-        if (pmo)
-            pmo->finish();
+        uint32 maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
+        // Create/assign random-bot arena teams only for max-level characters, and only for 70/80 realms.
+        if ((maxLevel == 70 || maxLevel == 80) && bot->GetLevel() == maxLevel)
+        {
+            pmo = sPerfMonitor.start(PERF_MON_RNDBOT, "PlayerbotFactory_Arenas");
+            // LOG_INFO("playerbots", "Initializing arena teams...");
+            InitArenaTeam();
+            if (pmo)
+                pmo->finish();
+        }
     }
 
     if (!incremental)
@@ -4038,6 +4055,17 @@ void PlayerbotFactory::InitArenaTeam()
     if (!sPlayerbotAIConfig.IsInRandomAccountList(bot->GetSession()->GetAccountId()))
         return;
 
+    // Safety: only random bots should ever get random-bot arena teams.
+    if (!sRandomPlayerbotMgr.IsRandomBot(bot))
+        return;
+
+    uint32 maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
+    // Create/assign random-bot arena teams only for max-level characters, and only for 70/80 realms.
+    if (maxLevel != 70 && maxLevel != 80)
+        return;
+    if (bot->GetLevel() != maxLevel)
+        return;
+
     // Currently the teams are only remade after a server restart and if deleteRandomBotArenaTeams = 1
     // This is because randomBotArenaTeams is only empty on server restart.
     // A manual reinitalization (.playerbots rndbot init) is also required after the teams have been deleted.
@@ -4096,7 +4124,7 @@ void PlayerbotFactory::InitArenaTeam()
             continue;
         }
 
-        if (arenateam->GetMembersSize() < ((uint32)arenateam->GetType()) && bot->GetLevel() >= 70)
+        if (arenateam->GetMembersSize() < ((uint32)arenateam->GetType()))
         {
             ObjectGuid capt = arenateam->GetCaptain();
             Player* botcaptain = ObjectAccessor::FindPlayer(capt);
@@ -4406,7 +4434,6 @@ void PlayerbotFactory::ApplyEnchantAndGemsNew(bool destroyOld)
                     continue;
 
                 //SpellItemEnchantmentEntry const* enchant = sSpellItemEnchantmentStore.LookupEntry(enchant_id); //not used, line marked for removal.
-                StatsWeightCalculator calculator(bot);
                 float score = calculator.CalculateEnchant(enchant_id);
                 if (curCount[0] != 0)
                 {

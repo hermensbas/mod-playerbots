@@ -6,7 +6,14 @@
 #ifndef _PLAYERBOT_PLAYERbotAI_H
 #define _PLAYERBOT_PLAYERbotAI_H
 
+#include <array>
+#include <queue>
 #include <stack>
+#include <ctime>
+#include <map>
+#include <vector>
+
+#include "ObjectGuid.h"
 
 #include "Chat.h"
 #include "ChatFilter.h"
@@ -386,8 +393,56 @@ public:
     PlayerbotAI(Player* bot);
     virtual ~PlayerbotAI();
 
+
+    struct LosGameObjectCacheEntry
+    {
+        time_t timestamp = 0;
+        uint32 mapId = 0;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        bool hasPosition = false;
+        std::vector<ObjectGuid> gameObjects;
+    };
+
+    // Shared cache for numeric selection from the last "los gos" list.
+    // This is keyed by the command owner GUID, so all bots in the group can use: "u 1", "u 2", ...
+    static void SetSharedLosGameObjects(ObjectGuid ownerGuid, std::vector<ObjectGuid> const& gos, Player const* source);
+    static bool GetSharedLosGameObjects(ObjectGuid ownerGuid, LosGameObjectCacheEntry& outEntry);
+    static void ClearSharedLosGameObjects(ObjectGuid ownerGuid);
+
     void UpdateAI(uint32 elapsed, bool minimal = false) override;
     void UpdateAIInternal(uint32 elapsed, bool minimal = false) override;
+
+    // Schedule a delayed PvE re-equip after leaving BG/arena (teleport/loading safe).
+    // Used by PvP gear swap logic to avoid re-gearing during map transfer.
+    void SetPendingPveGearReequip(bool hadRealMaster);
+    // PvP/PvE gear swap tracking:
+    // - PvP swap increments an epoch counter (pvpSwapEpoch_). Leaving BG/arena schedules a single PvE restore for that epoch.
+    // - This avoids duplicate PvE re-equip even if LeaveBG() fires multiple times, and does not depend on BG instanceId reuse.
+    void OnPvpGearEquipped(uint32 instanceId);
+    bool IsPvpGearActive() const { return pvpGearActive_; }
+    uint32 GetPvpSwapEpoch() const { return pvpSwapEpoch_; }
+
+    // Bank-first PvE stash: move current equipped PvE items into bank before generating PvP gear.
+    // This makes leaving BG/arena cheap: we can restore PvE by swapping items back from bank.
+    // Only applies to wild random bots (no real master, not addclass).
+    bool StashPveGearToBankForNextPvpSwap();
+
+    // Anti-churn: decide whether a wild random-bot should leave a BG queue that has no real players.
+    // Returns true at most once per short interval, and only after the queue has been empty long enough.
+    bool ShouldLeaveEmptyBgQueue(uint32 queueTypeId, uint8 bracketId, bool hasRealPlayers,
+                               uint32 minEmptyMs = 0, uint32 attemptCooldownMs = 5000);
+    // BG/arena strategy / gear swap state (per-bot; avoids global static maps in BGStrategyCheckAction).
+    uint32 GetLastSeenBgInstanceId() const { return lastSeenBgInstanceId_; }
+    uint32 GetLastSwapBgInstanceId() const { return lastSwapBgInstanceId_; }
+    void SetLastSeenBgInstanceId(uint32 id) { lastSeenBgInstanceId_ = id; }
+    void SetLastSwapBgInstanceId(uint32 id) { lastSwapBgInstanceId_ = id; }
+    void ResetBgStrategyState()
+    {
+        lastSeenBgInstanceId_ = 0;
+        lastSwapBgInstanceId_ = 0;
+    }
 
     std::string const HandleRemoteCommand(std::string const command);
     void HandleCommand(uint32 type, std::string const text, Player* fromPlayer);
@@ -533,7 +588,7 @@ public:
     // Checks if the bot is really a player. Players always have themselves as master.
     bool IsRealPlayer() { return master ? (master == bot) : false; }
     // Bot has a master that is a player.
-    bool HasRealPlayerMaster();
+    bool HasRealPlayerMaster() const;
     // Bot has a master that is activly playing.
     bool HasActivePlayerMaster();
     // Get the group leader or the master of the bot.
@@ -566,7 +621,7 @@ public:
     BotCheatMask GetCheat() { return cheatMask; }
     void SetCheat(BotCheatMask mask) { cheatMask = mask; }
 
-    void SetMaster(Player* newMaster) { master = newMaster; }
+    void SetMaster(Player* newMaster);
     AiObjectContext* GetAiObjectContext() { return aiObjectContext; }
     ChatHelper* GetChatHelper() { return &chatHelper; }
     bool IsOpposing(Player* player);
@@ -615,6 +670,57 @@ private:
     void HandleCommands();
     void HandleCommand(uint32 type, const std::string& text, Player& fromPlayer, const uint32 lang = LANG_UNIVERSAL);
     bool _isBotInitializing = false;
+
+    // Pending PvE re-equip after leaving BG/arena (deferred until bot is back in world).
+    uint32 pendingPveGearReequipEpoch_ = 0;
+    bool pendingPveGearReequipHadRealMaster_ = false;
+
+    uint32 pendingPveGearReequipNextTryMs_ = 0;
+
+    uint32 donePveGearReequipEpoch_ = 0;
+
+    // Indicates whether the bot is currently in its PvP gear set (from BG/arena swap logic).
+    bool pvpGearActive_ = false;
+
+    // Epoch counter incremented each time the bot successfully equips PvP gear.
+    uint32 pvpSwapEpoch_ = 0;
+
+    // Bank-first PvE stash state (wild random bots only):
+    // - Before equipping PvP gear, we move current equipped PvE items into bank and remember their GUIDs by slot.
+    // - After leaving BG/arena, we restore by swapping those items back from bank.
+    // The epoch is aligned with pvpSwapEpoch_ (stash is prepared for pvpSwapEpoch_+1).
+    uint32 pveBankStashEpoch_ = 0;
+    std::array<uint64, EQUIPMENT_SLOT_END> pveBankStashedGuidRawBySlot_{};
+
+    // Post-restart safety: if a bot is stuck in PvP gear outside BG/arena (pvpGearActive_ reset), try to recover once.
+    bool postRestartPveRecoveryDone_ = false;
+    uint32 postRestartPveRecoveryNextTryMs_ = 0;
+
+    bool IsWildRandomBotForAutoGearSwap() const;
+    static bool ItemTemplateHasResilience(ItemTemplate const* proto);
+    bool LooksLikePvpGearEquipped() const;
+
+    bool FindFirstFreeBankSlot(uint8& outBag, uint8& outSlot) const;
+    uint32 CountFreeBankSlots() const;
+    void HardPurgeBankContents();
+    Item* FindItemInBankByGuidRaw(uint64 guidRaw, uint8& outBag, uint8& outSlot) const;
+    void ClearPveBankStash();
+
+    bool TryRestorePveGearFromBankStash(uint32 epoch);
+    bool TryRecoverPveGearFromBankHeuristic();
+    void PurgeResilienceItemsFromBankAndBags(uint32 maxToDestroy);
+
+    // BG queue empty-queue tracking (to avoid bot-only battlegrounds).
+    uint64 emptyBgQueueKey_ = 0;
+    uint32 emptyBgQueueSinceMs_ = 0;
+    uint64 lastEmptyBgQueueLeaveKey_ = 0;
+    uint32 lastEmptyBgQueueLeaveAttemptMs_ = 0;
+
+    // BG/arena instance tracking for BGStrategyCheckAction (per-bot state).
+    uint32 lastSeenBgInstanceId_ = 0;
+    uint32 lastSwapBgInstanceId_ = 0;
+
+
     inline bool IsValidUnit(const Unit* unit) const
     {
         return unit && unit->IsInWorld() && !unit->IsDuringRemoveFromWorld();

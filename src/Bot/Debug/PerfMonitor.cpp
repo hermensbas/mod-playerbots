@@ -7,30 +7,44 @@
 
 #include "Playerbots.h"
 
+#include <algorithm>
+
+namespace
+{
+    thread_local PerformanceStack tlsPerfStack;
+    constexpr std::size_t PERF_MON_STACK_MAX_DEPTH = 128;
+}
+
 PerfMonitorOperation* PerfMonitor::start(PerformanceMetric metric, std::string const name,
                                                        PerformanceStack* stack)
 {
     if (!sPlayerbotAIConfig.perfMonEnabled)
         return nullptr;
 
+    bool const usesStack = (stack != nullptr);
     std::string stackName = name;
 
-    if (stack)
+    if (usesStack)
     {
-        if (!stack->empty())
+        // We deliberately do NOT touch the provided stack pointer here.
+        // It can be dangling in rare edge-cases (bot AI/context destroyed mid-update).
+        // Use a thread-local stack instead to keep perf monitoring safe under concurrency.
+        if (!tlsPerfStack.empty())
         {
             std::ostringstream out;
             out << stackName << " [";
 
-            for (std::vector<std::string>::reverse_iterator i = stack->rbegin(); i != stack->rend(); ++i)
-                out << *i << (std::next(i) == stack->rend() ? "" : "|");
+            for (PerformanceStack::reverse_iterator i = tlsPerfStack.rbegin(); i != tlsPerfStack.rend(); ++i)
+                out << *i << (std::next(i) == tlsPerfStack.rend() ? "" : "|");
 
             out << "]";
-
-            stackName = out.str().c_str();
+            stackName = out.str();
         }
 
-        stack->push_back(name);
+        if (tlsPerfStack.size() >= PERF_MON_STACK_MAX_DEPTH)
+            tlsPerfStack.clear();
+
+        tlsPerfStack.push_back(name);
     }
 
     std::lock_guard<std::mutex> guard(lock);
@@ -45,11 +59,12 @@ PerfMonitorOperation* PerfMonitor::start(PerformanceMetric metric, std::string c
         data[metric][stackName] = pd;
     }
 
-    return new PerfMonitorOperation(pd, name, stack);
+    return new PerfMonitorOperation(pd, name, usesStack);
 }
 
 void PerfMonitor::PrintStats(bool perTick, bool fullStack)
 {
+    std::lock_guard<std::mutex> guard(lock);
     if (data.empty())
         return;
 
@@ -249,6 +264,7 @@ void PerfMonitor::PrintStats(bool perTick, bool fullStack)
 
 void PerfMonitor::Reset()
 {
+    std::lock_guard<std::mutex> guard(lock);
     for (std::map<PerformanceMetric, std::map<std::string, PerformanceData*>>::iterator i = data.begin();
          i != data.end(); ++i)
     {
@@ -265,9 +281,8 @@ void PerfMonitor::Reset()
     }
 }
 
-PerfMonitorOperation::PerfMonitorOperation(PerformanceData* data, std::string const name,
-                                                         PerformanceStack* stack)
-    : data(data), name(name), stack(stack)
+PerfMonitorOperation::PerfMonitorOperation(PerformanceData* data, std::string const name, bool usesStack)
+    : data(data), name(name), usesStack(usesStack), ownerThread(std::this_thread::get_id())
 {
     started = (std::chrono::time_point_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now()))
                   .time_since_epoch();
@@ -294,9 +309,25 @@ void PerfMonitorOperation::finish()
 
     ++data->count;
 
-    if (stack)
+    if (usesStack && ownerThread == std::this_thread::get_id())
     {
-        stack->erase(std::remove(stack->begin(), stack->end(), name), stack->end());
+        if (!tlsPerfStack.empty())
+        {
+            if (tlsPerfStack.back() == name)
+            {
+                tlsPerfStack.pop_back();
+            }
+            else
+            {
+                // Stack mismatch (can happen if some code path skipped finish).
+                // Remove the last matching entry if present; otherwise reset the stack.
+                auto rit = std::find(tlsPerfStack.rbegin(), tlsPerfStack.rend(), name);
+                if (rit != tlsPerfStack.rend())
+                    tlsPerfStack.erase(std::next(rit).base());
+                else
+                    tlsPerfStack.clear();
+            }
+        }
     }
 
     delete this;

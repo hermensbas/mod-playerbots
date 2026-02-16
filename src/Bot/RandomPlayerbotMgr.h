@@ -6,11 +6,20 @@
 #ifndef _PLAYERBOT_RANDOMPLAYERBOTMGR_H
 #define _PLAYERBOT_RANDOMPLAYERBOTMGR_H
 
+#include <list>
+#include <map>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 #include "NewRpgInfo.h"
 #include "ObjectGuid.h"
 #include "PlayerbotMgr.h"
 #include "GameTime.h"
 #include "PlayerbotCommandServer.h"
+
+struct CreatureData;
 
 struct BattlegroundInfo
 {
@@ -105,6 +114,12 @@ public:
     bool IsRandomBot(ObjectGuid::LowType bot);
     bool IsAddclassBot(Player* bot);
     bool IsAddclassBot(ObjectGuid::LowType bot);
+
+    // Fast lookup: real-player master -> controlled random-bots (so players without bots can skip packet forwarding).
+    bool HasMasterControlledRandomBots(ObjectGuid const& masterGuid) const;
+    void GetMasterControlledRandomBotGuidsSnapshot(ObjectGuid const& masterGuid, std::vector<ObjectGuid>& out) const;
+    void OnRandomBotMasterChanged(ObjectGuid const& botGuid, ObjectGuid const& oldMasterGuid, ObjectGuid const& newMasterGuid);
+    void OnRandomBotLoggedOut(ObjectGuid const& botGuid);
     void Randomize(Player* bot);
     void Clear(Player* bot);
     void RandomizeFirst(Player* bot);
@@ -152,6 +167,11 @@ public:
     void CheckLfgQueue();
     void CheckPlayers();
     void LogBattlegroundInfo();
+
+    // Prevent "wild" random-bots (no real-player master) from re-joining recently evacuated empty battleground instances.
+    // Used by BG status handler when a bot receives an invite to a specific BG instance.
+    bool IsWildBgJoinBlocked(uint32 instanceId);
+    void ClearWildBgJoinBlock(uint32 instanceId);
 
     std::map<TeamId, std::map<BattlegroundTypeId, std::vector<uint32>>> getBattleMastersCache()
     {
@@ -234,13 +254,54 @@ private:
     float activityMod = 0.25;
     bool _isBotInitializing = true;
     bool _isBotLogging = true;
+    // Optional smoothing of heavy random-bot ticks by splitting them into smaller slices.
+    enum class SlicedPhase : uint8
+    {
+        None = 0,
+        Updating,
+        LoginPrep,
+        LoggingIn
+    };
+
+    void BeginSlicedCycle();
+    void ProcessSlicedSlice();
+    void EndSlicedCycle();
+
+    bool _slicedCycleActive = false;
+    SlicedPhase _slicedPhase = SlicedPhase::None;
+    uint32 _slicedLogicalIntervalMs = 0;
+    uint32 _slicedElapsedMs = 0;
+
+    uint32 _slicedDtMs = 0;
+    uint64 _slicedUpdateBudgetAcc = 0;
+    uint64 _slicedLoginBudgetAcc = 0;
+    uint32 _slicedUpdateTargetInitial = 0;
+    uint32 _slicedLoginTargetTotal = 0;
+    bool _slicedDidAttemptLoginPhase = false;
+
+    uint32 _slicedUpdateTarget = 0;
+    uint32 _slicedLoginTarget = 0;
+    uint32 _slicedLoginTargetInitial = 0;
+    uint32 _slicedUpdateDone = 0;
+    uint32 _slicedLoginDone = 0;
+    uint32 _slicedMaxNewBots = 0;
+
+    bool _slicedRealPlayerIsLogged = false;
+    bool _slicedCanAttemptLogin = false;
+
+    std::vector<uint32> _slicedBotSnapshot;
+    size_t _slicedUpdateIndex = 0;
+    size_t _slicedLoginIndex = 0;
+
     NewRpgStatistic rpgStasticTotal;
     CachedEvent* FindEvent(uint32 bot, std::string const& event);
     uint32 GetEventValue(uint32 bot, std::string const& event);
     std::string GetEventData(uint32 bot, std::string const& event);
     uint32 SetEventValue(uint32 bot, std::string const& event, uint32 value, uint32 validIn,
                          std::string const& data = "");
+    void FlushPendingEventDbWrites(bool force = false);
     void GetBots();
+    void BuildCreatureDataEntryIndex();
     std::vector<uint32> GetBgBots(uint32 bracket);
     time_t BgCheckTimer;
     time_t LfgCheckTimer;
@@ -262,13 +323,46 @@ private:
     std::map<uint32, std::map<uint32, std::vector<WorldLocation>>> rpgLocsCacheLevel;
     std::map<TeamId, std::map<BattlegroundTypeId, std::vector<uint32>>> BattleMastersCache;
     std::unordered_map<uint32, BotEventCache> eventCache;
+
+    // Batched persistence of random-bot events to reduce DB commit overhead.
+    struct PendingBotEventWrite
+    {
+        uint32 value = 0;
+        uint32 validIn = 0;
+        uint32 changeTime = 0;     // NowSeconds() at the time of scheduling
+        std::string data;
+    };
+
+    std::unordered_map<uint32, std::unordered_map<std::string, PendingBotEventWrite>> _pendingEventWrites;
+    size_t _pendingEventWritesCount = 0;
+    uint32 _pendingEventLastFlushMs = 0;
+
+    // Fast lookup for CreatureData by entry (avoids full scans of GetAllCreatureData()).
+    // Store the spawn guid (low) instead of a raw pointer so the lookup stays valid even if
+    // creature data is reloaded (pointers can be invalidated by container rehash/rebuild).
+    std::unordered_map<uint32, ObjectGuid::LowType> _creatureDataByEntry;
+    bool _creatureEntryIndexBuilt = false;
     std::list<uint32> currentBots;
     uint32 bgBotsCount;
     uint32 playersLevel;
 
+    // --- Wild random-bot battleground maintenance ---
+    // We track empty BG instances (no real players) to evict "wild" random-bots after a short delay,
+    // and to temporarily block immediate re-joins to the same instance (stale BG queue snapshots, etc.).
+    uint32 _wildBgMaintenanceNextSec = 0;
+    std::unordered_map<uint32, uint32> _wildBgEmptySinceSec;         // instanceId -> first time we saw it empty
+    std::unordered_map<uint32, uint32> _wildBgJoinBlockedUntilSec;    // instanceId -> block expiration timestamp
+
+    void UpdateWildBotBattlegroundMaintenance();
+
     // Account lists
     std::vector<uint32> rndBotTypeAccounts;             // Accounts marked as RNDbot (type 1)
     std::vector<uint32> addClassTypeAccounts;           // Accounts marked as AddClass (type 2)
+
+    // Fast master->controlled random-bots index (maintained via PlayerbotAI::SetMaster()).
+    // Note: only real-player masters are tracked (bot masters are ignored).
+    std::unordered_map<ObjectGuid, std::unordered_set<ObjectGuid>> _controlledRandomBotsByMaster;
+    std::unordered_map<ObjectGuid, ObjectGuid> _controlledRandomBotMaster;
 
     //void ScaleBotActivity();      // Deprecated function
     static inline uint32 NowSeconds() { return static_cast<uint32>(GameTime::GetGameTime().count()); }

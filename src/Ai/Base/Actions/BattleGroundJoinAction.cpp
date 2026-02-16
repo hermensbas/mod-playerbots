@@ -5,16 +5,256 @@
 
 #include "BattleGroundJoinAction.h"
 
+#include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
+
 #include "ArenaTeam.h"
 #include "ArenaTeamMgr.h"
 #include "BattlegroundMgr.h"
 #include "Event.h"
 #include "GroupMgr.h"
+#include "ObjectAccessor.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "PositionValue.h"
+#include "UpdateTime.h"
+#include "PlayerbotFactory.h"
 
-bool BGJoinAction::Execute(Event /*event*/)
+namespace
+{
+    // For Random Battleground queue (RB), the template BG is typically 10v10 and does not reflect the
+    // actual battleground that will be selected (10/15/40). For queue filling we want a safe upper bound
+    // that matches the largest possible battleground size for the current level bracket, while keeping
+    // "bots only queue with real players" behavior unchanged (that logic is controlled elsewhere).
+    static uint32 GetRandomBgMaxPlayersPerTeam(Player* bot, BattlegroundBracketId bracketId)
+    {
+        // Cache per bracket to avoid scanning every tick.
+        static uint32 sCachedSize[MAX_BATTLEGROUND_BRACKETS] = {};
+        static bool sCachedValid[MAX_BATTLEGROUND_BRACKETS] = {};
+
+        uint32 br = uint32(bracketId);
+        if (br < MAX_BATTLEGROUND_BRACKETS && sCachedValid[br] && sCachedSize[br])
+            return sCachedSize[br];
+
+        uint32 level = bot ? bot->GetLevel() : 0;
+        uint32 maxTeamSize = 0;
+
+        // Scan battleground queue types (non-arena, non-RB) and pick the largest team size that is valid
+        // for this bracket and accessible for the bot's level.
+        for (int qt = BATTLEGROUND_QUEUE_AV; qt < MAX_BATTLEGROUND_QUEUE_TYPES; ++qt)
+        {
+            BattlegroundQueueTypeId qid = BattlegroundQueueTypeId(qt);
+
+            // Ignore random battleground and all-arenas pseudo queues.
+            if (qid == BATTLEGROUND_QUEUE_RB)
+                continue;
+
+            // Ignore arenas.
+            if (BattlegroundMgr::BGArenaType(qid) != ARENA_TYPE_NONE)
+                continue;
+
+            BattlegroundTypeId tid = BattlegroundMgr::BGTemplateId(qid);
+            if (tid == BATTLEGROUND_RB)
+                continue;
+
+            if (bot && !bot->GetBGAccessByLevel(tid))
+                continue;
+
+            Battleground* tmpl = sBattlegroundMgr->GetBattlegroundTemplate(tid);
+            if (!tmpl)
+                continue;
+
+            PvPDifficultyEntry const* pvpDiff = GetBattlegroundBracketByLevel(tmpl->GetMapId(), level);
+            if (!pvpDiff || pvpDiff->GetBracketId() != bracketId)
+                continue;
+
+            maxTeamSize = std::max<uint32>(maxTeamSize, tmpl->GetMaxPlayersPerTeam());
+        }
+
+        // Fallback: use RB template size (usually 10) if nothing matched.
+        if (!maxTeamSize)
+        {
+            Battleground* rbTmpl = sBattlegroundMgr->GetBattlegroundTemplate(BATTLEGROUND_RB);
+            maxTeamSize = rbTmpl ? rbTmpl->GetMaxPlayersPerTeam() : 10;
+        }
+
+        // Safety clamp (WotLK max is 40).
+        if (maxTeamSize > 40)
+            maxTeamSize = 40;
+        if (!maxTeamSize)
+            maxTeamSize = 10;
+
+        if (br < MAX_BATTLEGROUND_BRACKETS)
+        {
+            sCachedSize[br] = maxTeamSize;
+            sCachedValid[br] = true;
+        }
+
+        return maxTeamSize;
+    }
+
+    static uint32 GetEffectiveMaxPlayersPerTeam(Player* bot, BattlegroundTypeId bgTypeId, BattlegroundBracketId bracketId, Battleground* bgTemplate)
+    {
+        if (!bgTemplate)
+            return 0;
+
+        uint32 teamSize = bgTemplate->GetMaxPlayersPerTeam();
+
+        // Random BG template size is not representative; use bracket-aware upper bound.
+        if (bgTypeId == BATTLEGROUND_RB)
+            teamSize = GetRandomBgMaxPlayersPerTeam(bot, bracketId);
+
+        if (teamSize > 40)
+            teamSize = 40;
+        if (!teamSize)
+            teamSize = 10;
+
+        return teamSize;
+    }
+
+
+    // For rated arenas we want bot teams to be near the rating/MMR of real players currently queued
+    // for the same bracket and arena type.
+    static uint32 GetQueuedRealPlayersMatchmakerTarget(BattlegroundQueueTypeId queueTypeId, BattlegroundBracketId bracketId,
+                                                       ArenaType arenaType)
+    {
+        // This scan over bgQueue.m_QueuedPlayers can be quite expensive when called frequently
+        // (e.g. 2000 bots evaluating arena queues). Cache for a short TTL to avoid N-times-per-tick work.
+        struct Key
+        {
+            uint32 q = 0;
+            uint8 bracket = 0;
+            uint8 arena = 0;
+
+            bool operator==(Key const& o) const { return q == o.q && bracket == o.bracket && arena == o.arena; }
+        };
+
+        struct KeyHash
+        {
+            size_t operator()(Key const& k) const
+            {
+                // Simple mix: q uses low bits, then bracket/arena.
+                return (size_t(k.q) * 1315423911u) ^ (size_t(k.bracket) << 8) ^ size_t(k.arena);
+            }
+        };
+
+        struct CacheEntry
+        {
+            uint32 target = 0;
+            uint32 tsMs = 0;
+        };
+
+        static std::unordered_map<Key, CacheEntry, KeyHash> s_cache;
+        static uint32 s_lastPruneMs = 0;
+        constexpr uint32 kTtlMs = 1000;
+        constexpr uint32 kPruneEveryMs = 5000;
+        constexpr size_t kMaxEntries = 64;
+
+        uint32 nowMs = getMSTime();
+        Key key{uint32(queueTypeId), uint8(bracketId), uint8(arenaType)};
+
+        auto itCached = s_cache.find(key);
+        if (itCached != s_cache.end() && (nowMs - itCached->second.tsMs) <= kTtlMs)
+            return itCached->second.target;
+
+        BattlegroundQueue& bgQueue = sBattlegroundMgr->GetBattlegroundQueue(queueTypeId);
+
+        uint64 sum = 0;
+        uint32 count = 0;
+        std::unordered_set<uint32> seenArenaTeams;
+
+        for (auto const& qp : bgQueue.m_QueuedPlayers)
+        {
+            ObjectGuid guid = qp.first;
+            Player* player = ObjectAccessor::FindConnectedPlayer(guid);
+            if (!player || !player->GetSession())
+                continue;
+
+            // Only use real players as target source
+            if (player->GetSession()->IsBot())
+                continue;
+
+            GroupQueueInfo ginfo;
+            if (!bgQueue.GetPlayerGroupInfoData(guid, &ginfo))
+                continue;
+
+            if (!ginfo.IsRated)
+                continue;
+
+            if (ginfo.BracketId != uint8(bracketId))
+                continue;
+
+            if (ginfo.ArenaType != uint8(arenaType))
+                continue;
+
+            // De-duplicate by arena team id so a premade group doesn't overweight the average
+            if (ginfo.ArenaTeamId)
+            {
+                if (!seenArenaTeams.insert(ginfo.ArenaTeamId).second)
+                    continue;
+            }
+
+            uint32 mmr = ginfo.ArenaMatchmakerRating ? ginfo.ArenaMatchmakerRating : ginfo.ArenaTeamRating;
+            if (!mmr)
+                continue;
+
+            sum += mmr;
+            ++count;
+        }
+
+        uint32 target = count ? uint32(sum / count) : 0;
+
+        s_cache[key] = CacheEntry{target, nowMs};
+
+        // Opportunistic prune to keep the cache tiny.
+        if (s_cache.size() > kMaxEntries && (nowMs - s_lastPruneMs) > kPruneEveryMs)
+        {
+            s_lastPruneMs = nowMs;
+            for (auto it = s_cache.begin(); it != s_cache.end();)
+            {
+                if ((nowMs - it->second.tsMs) > kPruneEveryMs)
+                    it = s_cache.erase(it);
+                else
+                    ++it;
+            }
+        }
+
+        return target;
+    }
+
+    static uint16 ClampArenaRating(int32 rating)
+    {
+        if (rating < 0)
+            return 0;
+        if (rating > 2600)
+            return 2600;
+        return uint16(rating);
+    }
+
+    static void ApplyArenaTeamRatingInMemory(ArenaTeam* team, uint16 rating)
+    {
+        if (!team)
+            return;
+
+        ArenaTeamStats stats = team->GetStats();
+        stats.Rating = rating;
+        team->SetArenaTeamStats(stats);
+
+        for (auto& m : team->GetMembers())
+        {
+            m.PersonalRating = rating;
+            m.MatchMakerRating = rating;
+            m.MaxMMR = rating;
+        }
+
+        team->NotifyStatsChanged();
+    }
+
+
+} // namespace
+
+bool BGJoinAction::Execute(Event event)
 {
     uint32 queueType = AI_VALUE(uint32, "bg type");
     if (!queueType)  // force join to fill bg
@@ -24,6 +264,8 @@ bool BGJoinAction::Execute(Event /*event*/)
 
         BattlegroundQueueTypeId queueTypeId = (BattlegroundQueueTypeId)bgList[urand(0, bgList.size() - 1)];
         BattlegroundTypeId bgTypeId = BattlegroundMgr::BGTemplateId(queueTypeId);
+        BattlegroundBracketId bracketId;
+        bool isArena = false;
         bool isRated = false;
 
         Battleground* bg = sBattlegroundMgr->GetBattlegroundTemplate(bgTypeId);
@@ -35,8 +277,12 @@ bool BGJoinAction::Execute(Event /*event*/)
         if (!pvpDiff)
             return false;
 
+        bracketId = pvpDiff->GetBracketId();
+
         if (ArenaType type = ArenaType(BattlegroundMgr::BGArenaType(queueTypeId)))
         {
+            isArena = true;
+
             std::vector<uint32>::iterator i = find(ratedList.begin(), ratedList.end(), queueTypeId);
             if (i != ratedList.end())
                 isRated = true;
@@ -228,8 +474,8 @@ bool BGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battlegroun
         return false;
 
     TeamId teamId = bot->GetTeamId();
-    uint32 BracketSize = bg->GetMaxPlayersPerTeam() * 2;
-    uint32 TeamSize = bg->GetMaxPlayersPerTeam();
+    uint32 TeamSize = GetEffectiveMaxPlayersPerTeam(bot, bgTypeId, bracketId, bg);
+    uint32 BracketSize = TeamSize * 2;
 
     // If the bot is in a group, only the leader can queue
     if (bot->GetGroup() && !bot->GetGroup()->IsLeader(bot->GetGUID()))
@@ -293,6 +539,15 @@ bool BGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battlegroun
     uint32 bgHordePlayerCount = sRandomPlayerbotMgr.BattlegroundData[queueTypeId][bracketId].bgHordePlayerCount;
     uint32 activeBgQueue = sRandomPlayerbotMgr.BattlegroundData[queueTypeId][bracketId].activeBgQueue;
     uint32 bgInstanceCount = sRandomPlayerbotMgr.BattlegroundData[queueTypeId][bracketId].bgInstanceCount;
+
+    // Wild random-bots: do not join battleground queues unless there is at least one real player queued/inside.
+    // (Real players in BG still count because they remain in battleground queue.)
+    if (sRandomPlayerbotMgr.IsRandomBot(bot))
+    {
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (botAI && !botAI->HasRealPlayerMaster() && (bgAlliancePlayerCount + bgHordePlayerCount) == 0)
+            return false;
+    }
 
     if (teamId == TEAM_ALLIANCE)
     {
@@ -401,7 +656,8 @@ bool BGJoinAction::JoinQueue(uint32 type)
         return false;
 
     bracketId = pvpDiff->GetBracketId();
-
+    uint32 TeamSize = GetEffectiveMaxPlayersPerTeam(bot, bgTypeId, bracketId, bg);
+    uint32 BracketSize = TeamSize * 2;
     TeamId teamId = bot->GetTeamId();
 
     // check if already in queue
@@ -478,6 +734,8 @@ bool BGJoinAction::JoinQueue(uint32 type)
     if (isArena)
     {
         isArena = true;
+        BracketSize = type * 2;
+        TeamSize = type;
         isRated = botAI->GetAiObjectContext()->GetValue<uint32>("arena type")->Get();
 
         if (joinAsGroup)
@@ -544,6 +802,24 @@ bool BGJoinAction::JoinQueue(uint32 type)
     }
     else
     {
+        // Rated arenas: dynamically align random-bot arena-team rating/MMR close to real players currently queued.
+        // This helps bots face opponents near the player's current bracket/skill without recreating teams.
+        if (isRated && sRandomPlayerbotMgr.IsRandomBot(bot) && !sRandomPlayerbotMgr.IsAddclassBot(bot))
+        {
+            uint32 target = GetQueuedRealPlayersMatchmakerTarget(queueTypeId, bracketId, arenaType);
+            if (target)
+            {
+                uint16 desired = ClampArenaRating(int32(target) + irand(-100, 100));
+                if (ArenaTeam* team = sArenaTeamMgr->GetArenaTeamByCaptain(bot->GetGUID(), arenaType))
+                {
+                    ApplyArenaTeamRatingInMemory(team, desired);
+                    LOG_DEBUG("playerbots", "Bot {} <{}>: set arena team #{} ({}) rating/MMR to {} (target {})",
+                              bot->GetGUID().ToString().c_str(), bot->GetName(), team->GetId(), team->GetName().c_str(),
+                              desired, target);
+                }
+            }
+        }
+
         WorldPacket arena_packet(CMSG_BATTLEMASTER_JOIN_ARENA, 20);
         arena_packet << unit->GetGUID() << arenaslot << asGroup << uint8(isRated);
         bot->GetSession()->HandleBattlemasterJoinArena(arena_packet);
@@ -561,9 +837,8 @@ bool FreeBGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battleg
         return false;
 
     TeamId teamId = bot->GetTeamId();
-
-    uint32 BracketSize = bg->GetMaxPlayersPerTeam() * 2;
-    uint32 TeamSize = bg->GetMaxPlayersPerTeam();
+    uint32 TeamSize = GetEffectiveMaxPlayersPerTeam(bot, bgTypeId, bracketId, bg);
+    uint32 BracketSize = TeamSize * 2;
 
     // If the bot is in a group, only the leader can queue
     if (bot->GetGroup() && !bot->GetGroup()->IsLeader(bot->GetGUID()))
@@ -628,6 +903,15 @@ bool FreeBGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battleg
     uint32 activeBgQueue = sRandomPlayerbotMgr.BattlegroundData[queueTypeId][bracketId].activeBgQueue;
     uint32 bgInstanceCount = sRandomPlayerbotMgr.BattlegroundData[queueTypeId][bracketId].bgInstanceCount;
 
+    // Wild random-bots: do not join battleground queues unless there is at least one real player queued/inside.
+    // (Real players in BG still count because they remain in battleground queue.)
+    if (sRandomPlayerbotMgr.IsRandomBot(bot))
+    {
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (botAI && !botAI->HasRealPlayerMaster() && (bgAlliancePlayerCount + bgHordePlayerCount) == 0)
+            return false;
+    }
+
     if (teamId == TEAM_ALLIANCE)
     {
         if ((bgAllianceBotCount + bgAlliancePlayerCount) < TeamSize * (activeBgQueue + bgInstanceCount))
@@ -642,7 +926,7 @@ bool FreeBGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battleg
     return false;
 }
 
-bool BGLeaveAction::Execute(Event /*event*/)
+bool BGLeaveAction::Execute(Event event)
 {
     if (!(bot->InBattlegroundQueue() || bot->InBattleground()))
         return false;
@@ -700,6 +984,12 @@ bool BGStatusAction::LeaveBG(PlayerbotAI* botAI)
     bool isArena = bg->isArena();
     bool isRandomBot = sRandomPlayerbotMgr.IsRandomBot(bot);
 
+
+    // Snapshot before we clear master (we need it to pick the correct gear limits).
+    bool hadRealMaster = false;
+    if (isRandomBot)
+        hadRealMaster = botAI->HasRealPlayerMaster();
+
     if (isRandomBot)
         botAI->SetMaster(nullptr);
 
@@ -728,6 +1018,11 @@ bool BGStatusAction::LeaveBG(PlayerbotAI* botAI)
 
     bot->GetSession()->HandleBattlefieldLeaveOpcode(packet);
 
+    // Wild random-bots: never keep Deserter. It can appear due to forced leaves, bugs or edge cases.
+    // Removing it here keeps bots from getting stuck unable to queue again.
+    if (isRandomBot && !hadRealMaster && bot->HasAura(26013))
+        bot->RemoveAurasDueToSpell(26013);
+
     botAI->ResetStrategies(!isRandomBot);
     botAI->GetAiObjectContext()->GetValue<uint32>("bg type")->Set(0);
     botAI->GetAiObjectContext()->GetValue<uint32>("bg role")->Set(0);
@@ -736,6 +1031,13 @@ bool BGStatusAction::LeaveBG(PlayerbotAI* botAI)
     PositionInfo pos = botAI->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get()["bg objective"];
     pos.Reset();
     posMap["bg objective"] = pos;
+
+
+    // Random bots only: schedule PvE re-equip after leaving BG/arena.
+    // Leaving a battleground/arena usually involves a map transfer, so we defer the actual re-equip
+    // until the bot is back in world (handled in PlayerbotAI::UpdateAI).
+    if (isRandomBot)
+        botAI->SetPendingPveGearReequip(hadRealMaster);
     return true;
 }
 
@@ -800,12 +1102,19 @@ bool BGStatusAction::Execute(Event event)
     if (!queueTypeId)
         return false;
 
-    BattlegroundBracketId bracketId;
+    BattlegroundBracketId bracketId = BG_BRACKET_ID_FIRST;
+
     Battleground* bg = sBattlegroundMgr->GetBattlegroundTemplate(_bgTypeId);
+    if (!bg)
+        return false;
+
     mapId = bg->GetMapId();
+
     PvPDifficultyEntry const* pvpDiff = GetBattlegroundBracketByLevel(mapId, bot->GetLevel());
-    if (pvpDiff)
-        bracketId = pvpDiff->GetBracketId();
+    if (!pvpDiff)
+        return false;
+
+    bracketId = pvpDiff->GetBracketId();
 
     bool isArena = false;
     uint8 type = false;  // arenatype if arena
@@ -886,6 +1195,8 @@ bool BGStatusAction::Execute(Event event)
         GroupQueueInfo ginfo;
         if (bgQueue.GetPlayerGroupInfoData(bot->GetGUID(), &ginfo))
         {
+            // Wild random-bots: do not stay queued for battlegrounds when there are no real players queued.
+            // This prevents bot-only battleground instances from starting when real players leave the queue.
             if (ginfo.IsInvitedToBGInstanceGUID && !bot->InBattleground())
             {
                 // BattlegroundMgr::GetBattleground() does not return battleground if bgTypeId==BATTLEGROUND_AA
@@ -936,7 +1247,19 @@ bool BGStatusAction::Execute(Event event)
         if (isArena)
             timer = TIME_TO_AUTOREMOVE;
         else
-            timer = TIME_TO_AUTOREMOVE + 1000 * (bg->GetMaxPlayersPerTeam() * 8);
+        {
+            uint32 teamSize = bg->GetMaxPlayersPerTeam();
+
+            // For Random Battleground queue, use bracket-aware upper bound so bots don't leave too early
+            // when a 15v15 or 40v40 battleground is selected.
+            if (_bgTypeId == BATTLEGROUND_RB)
+            {
+                if (PvPDifficultyEntry const* pvpDiff = GetBattlegroundBracketByLevel(bg->GetMapId(), bot->GetLevel()))
+                    teamSize = GetEffectiveMaxPlayersPerTeam(bot, _bgTypeId, pvpDiff->GetBracketId(), bg);
+            }
+
+            timer = TIME_TO_AUTOREMOVE + 1000 * (teamSize * 8);
+        }
 
         if (Time2 > timer && isArena)  // disabled for BG
             leaveQ = true;
@@ -1018,7 +1341,9 @@ bool BGStatusAction::Execute(Event event)
             }
         }
 
-        LOG_INFO("playerbots", "Bot {} {}:{} <{}> joined {} - {}", bot->GetGUID().ToString().c_str(),
+        // Wild random-bots: avoid re-joining recently evacuated empty battleground instances.
+        // This prevents "leave -> immediate re-invite -> join" loops on bot-only BGs.
+                LOG_INFO("playerbots", "Bot {} {}:{} <{}> joined {} - {}", bot->GetGUID().ToString().c_str(),
                  bot->GetTeamId() == TEAM_ALLIANCE ? "A" : "H", bot->GetLevel(), bot->GetName(),
                  isArena ? "Arena" : "BG", _bgType);
 
@@ -1053,7 +1378,7 @@ bool BGStatusAction::Execute(Event event)
     return true;
 }
 
-bool BGStatusCheckAction::Execute(Event /*event*/)
+bool BGStatusCheckAction::Execute(Event event)
 {
     if (bot->IsBeingTeleported())
         return false;
@@ -1069,19 +1394,162 @@ bool BGStatusCheckAction::Execute(Event /*event*/)
 
 bool BGStatusCheckAction::isUseful() { return bot->InBattlegroundQueue(); }
 
-bool BGStrategyCheckAction::Execute(Event /*event*/)
+bool BGStrategyCheckAction::Execute(Event event)
 {
-    bool inside_bg = bot->InBattleground() && bot->GetBattleground();
-    ;
-    if (!inside_bg && botAI->HasStrategy("battleground", BOT_STATE_NON_COMBAT))
+
+    // Note: InBattleground() can be true for a short moment while GetBattleground() is still null during transfer.
+    // Never treat a temporary null Battleground* as "left the battleground", or bots may lose their BG tactics and idle.
+    bool inBg = bot->InBattleground();
+
+    Battleground* bg = bot->GetBattleground();
+    bool inside_bg = inBg && bg;
+
+    // If we left BG/arena, restore normal strategies exactly once.
+    if (!inBg)
     {
-        botAI->ResetStrategies();
-        return true;
-    }
-    if (inside_bg && !botAI->HasStrategy("battleground", BOT_STATE_NON_COMBAT))
-    {
-        botAI->ResetStrategies();
+        if (botAI->GetLastSeenBgInstanceId() || botAI->GetLastSwapBgInstanceId())
+        {
+            botAI->ResetBgStrategyState();
+            botAI->ResetStrategies();
+            return true;
+        }
+
         return false;
     }
+
+    // Still entering/loading: wait until Battleground* becomes available.
+    if (!inside_bg)
+        return false;
+
+    uint32 instanceId = bg->GetInstanceID();
+    if (!instanceId)
+        return false;
+
+    // Apply BG/arena tactics once per BG/arena instance.
+    if (botAI->GetLastSeenBgInstanceId() != instanceId)
+    {
+        botAI->SetLastSeenBgInstanceId(instanceId);
+
+        // If we are already in PvP gear (e.g. quick re-invite), do not rebuild it again.
+        // Just mark the swap as done for this instance.
+        if (botAI->IsPvpGearActive())
+            botAI->SetLastSwapBgInstanceId(instanceId);
+        else
+            botAI->SetLastSwapBgInstanceId(0); // allow swap in this new instance
+
+        botAI->ResetStrategies();
+        // Do not return: we may swap gear in the same tick once the bot is fully on the BG map.
+    }
+
+    // Wild random bots only.
+    if (!sRandomPlayerbotMgr.IsRandomBot(bot))
+        return false;
+
+    // Addclass (summoned) bots must never auto-generate/swap PvP gear.
+    if (sRandomPlayerbotMgr.IsAddclassBot(bot))
+        return false;
+
+    // Wait until the bot is actually on the BG/arena map (avoid swapping during transfer).
+    if (!bot->IsInWorld() || bot->IsBeingTeleported() || bot->IsDuringRemoveFromWorld() || bot->GetMapId() != bg->GetMapId())
+        return false;
+
+    if (botAI->IsPvpGearActive() && botAI->GetLastSwapBgInstanceId() == instanceId)
+        return false;
+    // Random bots: generate PvP gear + enchants after fully entering BG/arena.
+    bool hasRealMaster = botAI->HasRealPlayerMaster();
+
+    // Do not touch player-controlled (real master) bots here. This logic is for wild random bots only.
+    if (hasRealMaster)
+        return false;
+
+    uint32 qualityLimit = sPlayerbotAIConfig.randomGearQualityLimit;
+    uint32 scoreLimit = sPlayerbotAIConfig.randomGearScoreLimit;
+
+    uint32 gs = scoreLimit == 0 ? 0 : PlayerbotFactory::CalcMixedGearScore(scoreLimit, qualityLimit);
+
+    bool isArena = bg->isArena();
+    bool isRatedArena = isArena && bg->isRated();
+
+    // Battleground gear cap for wild random bots (level 80 only).
+    // Deterministic per-bot item-level cap in [200..300] based on bot GUID low.
+    // This is an extra restriction on top of the configured gear limit.
+    if (bot->GetLevel() == 80 && !isArena)
+    {
+        uint32 x = static_cast<uint32>(bot->GetGUID().GetCounter());
+        x ^= x >> 16;
+        x *= 0x7feb352d;
+        x ^= x >> 15;
+        x *= 0x846ca68b;
+        x ^= x >> 16;
+
+        uint32 ilvlCap = 200u + (x % 101u); // 200..300
+
+        // Convert item-level cap to the same "mixed gear score" scale used by PlayerbotFactory.
+        uint32 bgGsCap = PlayerbotFactory::CalcMixedGearScore(ilvlCap, ITEM_QUALITY_EPIC);
+        if (bgGsCap == 0)
+            bgGsCap = 1;
+
+        if (gs == 0 || bgGsCap < gs)
+            gs = bgGsCap;
+    }
+
+
+    // Additional arena rating-based gear cap (level 80 only).
+    // 1000 rating => ilvl 200, 2400 rating => ilvl 300 (hard cap).
+    // This is an extra restriction on top of the configured gear limit.
+    if (bot->GetLevel() == 80 && isArena)
+    {
+        uint32 rating = 0;
+
+        // Only rated arenas have meaningful team rating. Skirmish stays at rating=0 and will fall back to 1000.
+        if (isRatedArena)
+        {
+            uint8 arenaType = bg->GetArenaType();  // 2,3,5
+            uint8 slot = ArenaTeam::GetSlotByType(arenaType);
+            uint32 teamId = bot->GetArenaTeamId(slot);
+            if (teamId)
+            {
+                if (ArenaTeam* team = sArenaTeamMgr->GetArenaTeamById(teamId))
+                    rating = team->GetRating();
+            }
+        }
+
+        // Treat unrated/skirmish/unknown as low rating.
+        if (rating == 0)
+            rating = 1000;
+
+        float ilvlCapF = 200.0f;
+        if (rating >= 2400)
+            ilvlCapF = 300.0f;
+        else if (rating > 1000)
+            ilvlCapF = 200.0f + float(rating - 1000) * (100.0f / 1400.0f);
+
+        uint32 ilvlCap = uint32(ilvlCapF + 0.5f);
+
+        // Convert item-level cap to the same "mixed gear score" scale used by PlayerbotFactory.
+        uint32 ratingGsCap = PlayerbotFactory::CalcMixedGearScore(ilvlCap, ITEM_QUALITY_EPIC);
+        if (ratingGsCap == 0)
+            ratingGsCap = 1;
+
+        if (gs == 0 || ratingGsCap < gs)
+            gs = ratingGsCap;
+    }
+
+    // Bank-first PvE stash: save the currently equipped PvE set to bank so leaving BG/arena can restore it cheaply.
+    botAI->StashPveGearToBankForNextPvpSwap();
+
+    uint8 savedLevel = bot->GetLevel();
+    PlayerbotFactory factory(bot, savedLevel, qualityLimit, gs, true);
+
+    // Force gear generation; do not touch talents/level/spells/etc.
+    factory.InitEquipment(false, true);
+
+    // Apply enchants/gems only.
+    if (savedLevel >= sPlayerbotAIConfig.minEnchantingBotLevel)
+        factory.ApplyEnchantAndGemsNew();
+
+    // Remember that this bot already swapped gear for this BG/arena instance.
+    botAI->OnPvpGearEquipped(instanceId);
+
     return false;
 }

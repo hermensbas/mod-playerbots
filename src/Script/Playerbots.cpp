@@ -438,17 +438,26 @@ public:
         if (player == nullptr)
             return;
 
-        PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+        if (!packet)
+            return;
 
-        if (botAI != nullptr)
+        if (PlayerbotAI* botAI = GET_PLAYERBOT_AI(player))
+        {
             botAI->HandleBotOutgoingPacket(*packet);
+        }
 
         if (PlayerbotMgr* playerbotMgr = GET_PLAYERBOT_MGR(player))
+        {
+            // If this real player controls no bots (alts or controlled random-bots), skip expensive forwarding.
+            if (playerbotMgr->GetPlayerbotsCount() == 0 && !sRandomPlayerbotMgr.HasMasterControlledRandomBots(player->GetGUID()))
+                return;
             playerbotMgr->HandleMasterOutgoingPacket(*packet);
+        }
     }
 
     void OnPlayerbotUpdate(uint32 diff) override
     {
+        PlayerbotHolder::UpdateInitQueue(diff);
         sRandomPlayerbotMgr.UpdateSessions();  // Per-bot updates only
     }
 

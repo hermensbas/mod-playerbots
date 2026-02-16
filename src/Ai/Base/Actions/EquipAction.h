@@ -23,10 +23,12 @@ public:
     void EquipItems(ItemIds ids);
     ItemIds SelectInventoryItemsToEquip();
 
+protected:
+    void EquipItem(Item* item);
+
 private:
     void EquipItem(FindItemVisitor* visitor);
     uint8 GetSmallestBagSlot();
-    void EquipItem(Item* item);
 };
 
 class EquipUpgradesPacketAction : public EquipAction

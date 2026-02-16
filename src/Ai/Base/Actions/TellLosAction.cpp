@@ -4,7 +4,10 @@
  */
 
 #include "TellLosAction.h"
+#include <algorithm>
+#include <istream>
 #include <sstream>
+#include <vector>
 
 #include "ChatHelper.h"
 #include "Event.h"
@@ -13,10 +16,70 @@
 #include "Playerbots.h"
 #include "StatsWeightCalculator.h"
 #include "World.h"
+#include "Group.h"
+#include "WorldSession.h"
+
+
+static bool IsLosResponder(PlayerbotAI* botAI)
+{
+    Player* bot = botAI ? botAI->GetBot() : nullptr;
+    if (!bot)
+        return false;
+
+    Group* group = bot->GetGroup();
+    if (!group)
+        return true;
+
+    // Prefer the first bot found in the group iteration.
+    Player* responder = nullptr;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* member = ref->GetSource();
+        if (!member)
+            continue;
+
+        WorldSession* session = member->GetSession();
+        if (!session || !session->IsBot())
+            continue;
+
+        responder = member;
+        break;
+    }
+
+    if (responder)
+        return responder == bot;
+
+    // Fallback: choose the smallest GUID among bots (stable selection).
+    ObjectGuid minGuid;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* member = ref->GetSource();
+        if (!member)
+            continue;
+
+        WorldSession* session = member->GetSession();
+        if (!session || !session->IsBot())
+            continue;
+
+        if (!minGuid || member->GetGUID() < minGuid)
+            minGuid = member->GetGUID();
+    }
+
+    if (!minGuid)
+        return true;
+
+    return bot->GetGUID() == minGuid;
+}
 
 bool TellLosAction::Execute(Event event)
 {
+    if (!IsLosResponder(botAI))
+        return true;
+
     std::string const param = event.getParam();
+    Player* owner = event.getOwner();
+    if (!owner)
+        owner = botAI->GetMaster();
 
     if (param.empty() || param == "targets")
     {
@@ -36,7 +99,7 @@ bool TellLosAction::Execute(Event event)
 
     if (param.empty() || param == "gos" || param == "game objects")
     {
-        ListGameObjects("--- Game objects ---", *context->GetValue<GuidVector>("nearest game objects"));
+        ListGameObjects("--- Game objects ---", *context->GetValue<GuidVector>("nearest game objects"), owner);
     }
 
     if (param.empty() || param == "players")
@@ -64,15 +127,59 @@ void TellLosAction::ListUnits(std::string const title, GuidVector units)
         }
     }
 }
-void TellLosAction::ListGameObjects(std::string const title, GuidVector gos)
+void TellLosAction::ListGameObjects(std::string const title, GuidVector gos, Player* owner)
 {
     botAI->TellMaster(title);
 
+    struct ListedGo
+    {
+        ObjectGuid guid;
+        float dist;
+    };
+
+    std::vector<ListedGo> filtered;
+    filtered.reserve(gos.size());
+
     for (ObjectGuid const guid : gos)
     {
-        if (GameObject* go = botAI->GetGameObject(guid))
-            botAI->TellMaster(chat->FormatGameobject(go));
+        GameObject* go = botAI->GetGameObject(guid);
+        if (!go)
+            continue;
+
+        float dist = bot->GetDistance2d(go);
+        if (dist > 30.0f)
+            continue;
+
+        filtered.push_back({go->GetGUID(), dist});
     }
+
+    // Farthest first so the closest object is printed last (most visible in chat).
+    std::sort(filtered.begin(), filtered.end(), [](ListedGo const& a, ListedGo const& b) {
+        return a.dist > b.dist;
+    });
+
+    std::vector<ObjectGuid> listed;
+    listed.reserve(filtered.size());
+
+    uint32 index = 1;
+    for (ListedGo const& entry : filtered)
+    {
+        GameObject* go = botAI->GetGameObject(entry.guid);
+        if (!go)
+            continue;
+
+        listed.push_back(entry.guid);
+
+        uint32 distM = entry.dist >= 0.0f ? uint32(entry.dist + 0.5f) : 0;
+
+        std::ostringstream out;
+        out << "[" << index << "] (" << distM << "m) " << go->GetName();
+        botAI->TellMaster(out.str());
+        ++index;
+    }
+
+    if (owner)
+        PlayerbotAI::SetSharedLosGameObjects(owner->GetGUID(), listed, owner);
 }
 
 bool TellAuraAction::Execute(Event /*event*/)

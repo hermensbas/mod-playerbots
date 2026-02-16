@@ -126,7 +126,7 @@ GuidVector PossibleNewRpgTargetsValue::Calculate()
     std::vector<std::pair<ObjectGuid, float>> guidDistancePairs;
     for (Unit* unit : targets)
     {
-        if (AcceptUnit(unit) && (ignoreLos || bot->IsWithinLOSInMap(unit)))
+        if (AcceptUnit(unit) && (ignoreLos || ServerFacade::instance().IsWithinLOSInMap(bot, unit)))
             guidDistancePairs.push_back({unit->GetGUID(), bot->GetExactDist(unit)});
     }
     // Override to sort by distance
@@ -191,7 +191,7 @@ GuidVector PossibleNewRpgGameObjectsValue::Calculate()
         if (!flagCheck)
             continue;
 
-        if (!ignoreLos && !bot->IsWithinLOSInMap(go))
+        if (!ignoreLos && !ServerFacade::instance().IsWithinLOSInMap(bot, go))
             continue;
 
         guidDistancePairs.push_back({go->GetGUID(), bot->GetExactDist(go)});
