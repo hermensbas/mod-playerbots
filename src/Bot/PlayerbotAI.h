@@ -7,6 +7,7 @@
 #define _PLAYERBOT_PLAYERbotAI_H
 
 #include <array>
+#include <mutex>
 #include <queue>
 #include <stack>
 #include <ctime>
@@ -359,6 +360,7 @@ public:
 private:
     std::map<uint16, std::string> handlers;
     std::stack<WorldPacket> queue;
+    std::mutex queueMutex;
 };
 
 class ChatCommandHolder

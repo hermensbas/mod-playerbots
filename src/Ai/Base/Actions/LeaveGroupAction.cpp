@@ -63,7 +63,7 @@ bool UninviteAction::Execute(Event event)
         }
 
         if (bot->GetName() == memberName)
-            return Leave();
+            return true;
     }
 
     if (p.GetOpcode() == CMSG_GROUP_UNINVITE_GUID)
@@ -73,7 +73,7 @@ bool UninviteAction::Execute(Event event)
         p >> guid;
 
         if (bot->GetGUID() == guid)
-            return Leave();
+            return true;
     }
 
     return false;
