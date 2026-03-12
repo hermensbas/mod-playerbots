@@ -4028,13 +4028,13 @@ bool PlayerbotAI::CanCastSpell(uint32 spellid, Unit* target, bool checkHasSpell,
         return false;
     }
 
-    if (bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr)
+    if (bot->GetCurrentSpell(CURRENT_GENERIC_SPELL) != nullptr || bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr)
     {
         if (!sPlayerbotAIConfig.logInGroupOnly || (bot->GetGroup() && HasRealPlayerMaster()))
         {
             LOG_DEBUG(
                 "playerbots",
-                "CanCastSpell() target name: {}, spellid: {}, bot name: {}, failed because has current channeled spell",
+                "CanCastSpell() target name: {}, spellid: {}, bot name: {}, failed because bot is already casting",
                 target->GetName(), spellid, bot->GetName());
         }
         return false;
@@ -4181,6 +4181,9 @@ bool PlayerbotAI::CanCastSpell(uint32 spellid, GameObject* goTarget, bool checkH
         return false;
 
     if (bot->HasSpellCooldown(spellid))
+        return false;
+
+    if (bot->GetCurrentSpell(CURRENT_GENERIC_SPELL) != nullptr || bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr)
         return false;
 
     SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellid);
@@ -4726,6 +4729,9 @@ bool PlayerbotAI::CanCastVehicleSpell(uint32 spellId, Unit* target)
         return false;
 
     if (vehicleBase->HasSpellCooldown(spellId))
+        return false;
+
+    if (vehicleBase->GetCurrentSpell(CURRENT_GENERIC_SPELL) != nullptr || vehicleBase->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr)
         return false;
 
     SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
