@@ -17,6 +17,7 @@
 
 #include "Playerbots.h"
 
+#include "Battleground.h"
 #include "BattlefieldScript.h"
 #include "Channel.h"
 #include "Config.h"
@@ -33,6 +34,78 @@
 #include "PlayerbotCommandScript.h"
 #include "cmath"
 #include "BattleGroundTactics.h"
+
+namespace
+{
+template <class F>
+void ForEachMasterControlledBot(Player* master, F&& fn)
+{
+    if (!master)
+        return;
+
+    if (PlayerbotMgr* playerbotMgr = GET_PLAYERBOT_MGR(master))
+    {
+        for (auto itr = playerbotMgr->GetPlayerBotsBegin(); itr != playerbotMgr->GetPlayerBotsEnd(); ++itr)
+        {
+            Player* bot = itr->second;
+            if (!bot)
+                continue;
+
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+            if (!botAI || botAI->IsRealPlayer() || botAI->GetMaster() != master)
+                continue;
+
+            fn(bot);
+        }
+    }
+
+    static thread_local std::vector<ObjectGuid> tlsControlledGuids;
+
+    std::vector<ObjectGuid> controlledGuids;
+    controlledGuids.swap(tlsControlledGuids);
+    controlledGuids.clear();
+
+    sRandomPlayerbotMgr.GetMasterControlledRandomBotGuidsSnapshot(master->GetGUID(), controlledGuids);
+
+    for (ObjectGuid const& guid : controlledGuids)
+    {
+        Player* bot = sRandomPlayerbotMgr.GetPlayerBot(guid);
+        if (!bot)
+            continue;
+
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (!botAI || botAI->IsRealPlayer() || botAI->GetMaster() != master)
+            continue;
+
+        fn(bot);
+    }
+
+    tlsControlledGuids.swap(controlledGuids);
+}
+
+void LeaveBotsFromMastersBattleground(Player* master, Battleground* bg)
+{
+    if (!master || !bg)
+        return;
+
+    uint32 bgInstanceId = bg->GetInstanceID();
+    BattlegroundTypeId bgTypeId = bg->GetBgTypeID();
+
+    ForEachMasterControlledBot(master, [&](Player* bot)
+    {
+        if (!bot->IsInWorld() || bot->IsBeingTeleported() || bot->IsDuringRemoveFromWorld())
+            return;
+
+        if (!bot->InBattleground() && !bot->InArena() && !bot->GetBattleground())
+            return;
+
+        if (bot->GetBattlegroundId() != bgInstanceId || bot->GetBattlegroundTypeId() != bgTypeId)
+            return;
+
+        bot->LeaveBattleground();
+    });
+}
+} // namespace
 
 class PlayerbotsDatabaseScript : public DatabaseScript
 {
@@ -89,7 +162,8 @@ public:
         PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_CHANNEL_CHAT,
         PLAYERHOOK_ON_GIVE_EXP,
-        PLAYERHOOK_ON_BEFORE_TELEPORT
+        PLAYERHOOK_ON_BEFORE_TELEPORT,
+        PLAYERHOOK_ON_REMOVE_FROM_BATTLEGROUND
     }) {}
 
     void OnPlayerLogin(Player* player) override
@@ -182,6 +256,18 @@ public:
         {
             playerbotMgr->UpdateAI(diff);
         }
+    }
+
+    void OnPlayerRemoveFromBattleground(Player* player, Battleground* bg) override
+    {
+        if (!player || !bg)
+            return;
+
+        WorldSession* session = player->GetSession();
+        if (!session || session->IsBot())
+            return;
+
+        LeaveBotsFromMastersBattleground(player, bg);
     }
 
     bool OnPlayerCanUseChat(Player* player, uint32 type, uint32 /*lang*/, std::string& msg, Player* receiver) override
