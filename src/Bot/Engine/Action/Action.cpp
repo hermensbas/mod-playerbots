@@ -12,6 +12,11 @@ Value<Unit*>* Action::GetTargetValue() { return context->GetValue<Unit*>(GetTarg
 
 Unit* Action::GetTarget() { return GetTargetValue()->Get(); }
 
+WorldSession* Action::GetBotSession() const
+{
+    return bot ? bot->GetSession() : nullptr;
+}
+
 ActionBasket::ActionBasket(ActionNode* action, float relevance, bool skipPrerequisites, Event event)
     : action(action), relevance(relevance), skipPrerequisites(skipPrerequisites), event(event), created(getMSTime())
 {

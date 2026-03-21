@@ -794,14 +794,16 @@ bool BGJoinAction::JoinQueue(uint32 type)
 
     if (!isArena)
     {
+        WorldSession* session = GetBotSession();
         WorldPacket* packet = new WorldPacket(CMSG_BATTLEMASTER_JOIN, 20);
         *packet << bot->GetGUID() << bgTypeId_ << instanceId << joinAsGroup;
         /// FIX race condition
         // bot->GetSession()->HandleBattlemasterJoinOpcode(packet);
-        bot->GetSession()->QueuePacket(packet);
+        session->QueuePacket(packet);
     }
     else
     {
+        WorldSession* session = GetBotSession();
         // Rated arenas: dynamically align random-bot arena-team rating/MMR close to real players currently queued.
         // This helps bots face opponents near the player's current bracket/skill without recreating teams.
         if (isRated && sRandomPlayerbotMgr.IsRandomBot(bot) && !sRandomPlayerbotMgr.IsAddclassBot(bot))
@@ -822,7 +824,7 @@ bool BGJoinAction::JoinQueue(uint32 type)
 
         WorldPacket arena_packet(CMSG_BATTLEMASTER_JOIN_ARENA, 20);
         arena_packet << unit->GetGUID() << arenaslot << asGroup << uint8(isRated);
-        bot->GetSession()->HandleBattlemasterJoinArena(arena_packet);
+        session->HandleBattlemasterJoinArena(arena_packet);
     }
 
     return true;
@@ -928,6 +930,8 @@ bool FreeBGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battleg
 
 bool BGLeaveAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     if (!(bot->InBattlegroundQueue() || bot->InBattleground()))
         return false;
 
@@ -962,7 +966,7 @@ bool BGLeaveAction::Execute(Event event)
 
     WorldPacket packet(CMSG_BATTLEFIELD_PORT, 20);
     packet << type << unk2 << (uint32)_bgTypeId << unk << uint8(0);
-    bot->GetSession()->QueuePacket(new WorldPacket(packet));
+    session->QueuePacket(new WorldPacket(packet));
 
     if (IsRandomBot)
         botAI->SetMaster(nullptr);
@@ -978,6 +982,8 @@ bool BGLeaveAction::Execute(Event event)
 bool BGStatusAction::LeaveBG(PlayerbotAI* botAI)
 {
     Player* bot = botAI->GetBot();
+    WorldSession* session = bot->GetSession();
+
     Battleground* bg = bot->GetBattleground();
     if (!bg)
         return false;
@@ -1016,7 +1022,7 @@ bool BGStatusAction::LeaveBG(PlayerbotAI* botAI)
     packet << uint32(0);
     packet << uint16(0);
 
-    bot->GetSession()->HandleBattlefieldLeaveOpcode(packet);
+    session->HandleBattlefieldLeaveOpcode(packet);
 
     // Wild random-bots: never keep Deserter. It can appear due to forced leaves, bugs or edge cases.
     // Removing it here keeps bots from getting stuck unable to queue again.
@@ -1213,12 +1219,13 @@ bool BGStatusAction::Execute(Event event)
                              bot->GetTeamId() == TEAM_ALLIANCE ? "A" : "H", bot->GetLevel(), bot->GetName(),
                              isArena ? "Arena" : "BG", _bgType);
                     WorldPacket emptyPacket;
-                    bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+                    WorldSession* session = GetBotSession();
+                    session->HandleCancelMountAuraOpcode(emptyPacket);
                     action = 0x1;
 
                     WorldPacket packet(CMSG_BATTLEFIELD_PORT, 20);
                     packet << type << unk2 << (uint32)_bgTypeId << unk << action;
-                    bot->GetSession()->QueuePacket(new WorldPacket(packet));
+                    session->QueuePacket(new WorldPacket(packet));
 
                     botAI->ResetStrategies(false);
                     if (!bot->GetBattleground())
@@ -1285,7 +1292,8 @@ bool BGStatusAction::Execute(Event event)
             WorldPacket packet(CMSG_BATTLEFIELD_PORT, 20);
             action = 0;
             packet << type << unk2 << (uint32)_bgTypeId << unk << action;
-            bot->GetSession()->QueuePacket(new WorldPacket(packet));
+            WorldSession* session = GetBotSession();
+            session->QueuePacket(new WorldPacket(packet));
 
             botAI->ResetStrategies(!IsRandomBot);
             botAI->GetAiObjectContext()->GetValue<uint32>("bg type")->Set(0);
@@ -1348,13 +1356,14 @@ bool BGStatusAction::Execute(Event event)
                  isArena ? "Arena" : "BG", _bgType);
 
         WorldPacket emptyPacket;
-        bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+        WorldSession* session = GetBotSession();
+        session->HandleCancelMountAuraOpcode(emptyPacket);
 
         action = 0x1;
 
         WorldPacket packet(CMSG_BATTLEFIELD_PORT, 20);
         packet << type << unk2 << (uint32)_bgTypeId << unk << action;
-        bot->GetSession()->QueuePacket(new WorldPacket(packet));
+        session->QueuePacket(new WorldPacket(packet));
 
         botAI->ResetStrategies(false);
         if (!bot->GetBattleground())
@@ -1380,11 +1389,13 @@ bool BGStatusAction::Execute(Event event)
 
 bool BGStatusCheckAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     if (bot->IsBeingTeleported())
         return false;
 
     WorldPacket packet(CMSG_BATTLEFIELD_STATUS);
-    bot->GetSession()->HandleBattlefieldStatusOpcode(packet);
+    session->HandleBattlefieldStatusOpcode(packet);
 
     LOG_INFO("playerbots", "Bot {} <{}> ({} {}) : Checking BG invite status", bot->GetGUID().ToString().c_str(),
              bot->GetName(), bot->GetLevel(), bot->GetTeamId() == TEAM_ALLIANCE ? "A" : "H");

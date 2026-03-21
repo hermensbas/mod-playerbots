@@ -112,7 +112,9 @@ public:
     void RemovePlayerBotData(ObjectGuid const& guid, bool is_AI);
 
     PlayerbotAI* GetPlayerbotAI(Player* player);
+    PlayerbotAI* GetPlayerbotAI(ObjectGuid const& guid);
     PlayerbotMgr* GetPlayerbotMgr(Player* player);
+    PlayerbotMgr* GetPlayerbotMgr(ObjectGuid const& guid);
 
 private:
     PlayerbotsMgr() = default;

@@ -10,6 +10,8 @@
 
 bool ShareQuestAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     std::string const link = event.getParam();
     if (!GetMaster())
         return false;
@@ -31,7 +33,7 @@ bool ShareQuestAction::Execute(Event event)
         {
             WorldPacket p;
             p << entry;
-            bot->GetSession()->HandlePushQuestToParty(p);
+            session->HandlePushQuestToParty(p);
             botAI->TellMaster("Quest shared");
             return true;
         }
@@ -42,6 +44,8 @@ bool ShareQuestAction::Execute(Event event)
 
 bool AutoShareQuestAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     bool shared = false;
 
     for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
@@ -97,7 +101,7 @@ bool AutoShareQuestAction::Execute(Event /*event*/)
 
         WorldPacket p;
         p << logQuest;
-        bot->GetSession()->HandlePushQuestToParty(p);
+        session->HandlePushQuestToParty(p);
         botAI->TellMaster("Quest shared");
         shared = true;
     }

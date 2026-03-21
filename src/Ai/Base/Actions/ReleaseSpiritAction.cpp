@@ -18,6 +18,8 @@
 // ReleaseSpiritAction implementation
 bool ReleaseSpiritAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     if (bot->IsAlive())
     {
         if (!bot->InBattleground())
@@ -49,7 +51,7 @@ bool ReleaseSpiritAction::Execute(Event event)
 
     WorldPacket releasePacket(CMSG_REPOP_REQUEST);
     releasePacket << uint8(0);
-    bot->GetSession()->HandleRepopRequestOpcode(releasePacket);
+    session->HandleRepopRequestOpcode(releasePacket);
 
     return true;
 }
@@ -80,13 +82,15 @@ void ReleaseSpiritAction::LogRelease(const std::string& releaseMsg, bool isAutoR
 // AutoReleaseSpiritAction implementation
 bool AutoReleaseSpiritAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     IncrementDeathCount();
     bot->DurabilityRepairAll(false, 1.0f, false);
     LogRelease("auto released", true);
 
     WorldPacket packet(CMSG_REPOP_REQUEST);
     packet << uint8(0);
-    bot->GetSession()->HandleRepopRequestOpcode(packet);
+    session->HandleRepopRequestOpcode(packet);
 
     LogRelease("releases spirit", true);
 
@@ -154,10 +158,12 @@ bool AutoReleaseSpiritAction::HandleBattlegroundSpiritHealer()
     }
     else if (!botAI->IsRealPlayer())
     {
+        WorldSession* session = GetBotSession();
+
         m_bgGossipTime = now;
         WorldPacket packet(CMSG_GOSSIP_HELLO);
         packet << spiritHealer->GetGUID();
-        bot->GetSession()->HandleGossipHelloOpcode(packet);
+        session->HandleGossipHelloOpcode(packet);
     }
 
     return true;
@@ -252,10 +258,12 @@ void RepopAction::PerformGraveyardTeleport(const GraveyardStruct* graveyard) con
 // SelfResurrectAction implementation for Warlock's Soulstone Resurrection/Shaman's Reincarnation
 bool SelfResurrectAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     if (!bot->IsAlive() && bot->GetUInt32Value(PLAYER_SELF_RES_SPELL))
     {
         WorldPacket packet(CMSG_SELF_RES);
-        bot->GetSession()->HandleSelfResOpcode(packet);
+        session->HandleSelfResOpcode(packet);
         return true;
     }
     return false;

@@ -99,6 +99,21 @@ static std::vector<ObjectGuid> const& GetUnitsInRangeCached(Player* bot, float r
 
     return entry.unitGuids;
 }
+
+static bool IsCastingSpellId(Unit* unit, uint32 spellId)
+{
+    if (!unit || !unit->HasUnitState(UNIT_STATE_CASTING))
+        return false;
+
+    for (uint32 spellType = CURRENT_FIRST_NON_MELEE_SPELL; spellType < CURRENT_MAX_SPELL; ++spellType)
+    {
+        Spell* currentSpell = unit->GetCurrentSpell(spellType);
+        if (currentSpell && currentSpell->m_spellInfo && currentSpell->m_spellInfo->Id == spellId)
+            return true;
+    }
+
+    return false;
+}
 } // namespace
 
 
@@ -1718,9 +1733,7 @@ void IccRotfaceTankPositionAction::MarkBossWithSkull(Unit* boss)
 
 bool IccRotfaceTankPositionAction::PositionMainTankAndMelee(Unit* boss)
 {
-    bool isBossCasting = false;
-    if (boss && boss->HasUnitState(UNIT_STATE_CASTING) && boss->GetCurrentSpell(SPELL_SLIME_SPRAY))
-        isBossCasting = true;
+    bool isBossCasting = IsCastingSpellId(boss, SPELL_SLIME_SPRAY);
 
     if (bot->GetExactDist2d(ICC_ROTFACE_CENTER_POSITION) > 7.0f && botAI->HasAggro(boss) && botAI->IsMainTank(bot))
         MoveTo(bot->GetMapId(), ICC_ROTFACE_CENTER_POSITION.GetPositionX(),
@@ -2057,9 +2070,7 @@ bool IccRotfaceGroupPositionAction::PositionRangedAndHealers(Unit* boss,Unit *sm
         return false;
 
     Difficulty diff = bot->GetRaidDifficulty();
-    bool isBossCasting = false;
-    if (boss && boss->HasUnitState(UNIT_STATE_CASTING) && boss->GetCurrentSpell(SPELL_SLIME_SPRAY))
-        isBossCasting = true;
+    bool isBossCasting = IsCastingSpellId(boss, SPELL_SLIME_SPRAY);
 
     bool isHeroic = (diff == RAID_DIFFICULTY_10MAN_HEROIC || diff == RAID_DIFFICULTY_25MAN_HEROIC);
 

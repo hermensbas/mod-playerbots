@@ -43,6 +43,7 @@
 #include "ObjectMgr.h"
 #include "PerfMonitor.h"
 #include "Player.h"
+#include "PveArenaCompat.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotMgr.h"
 #include "PlayerbotFactory.h"
@@ -387,8 +388,9 @@ void PlayerbotAI::SetMaster(Player* newMaster)
     if (master == newMaster)
         return;
 
-    Player* oldMaster = master;
+    ObjectGuid previousMasterGuid = masterGuid;
     master = newMaster;
+    masterGuid = newMaster ? newMaster->GetGUID() : ObjectGuid::Empty;
 
     // Maintain fast master->controlled random/addclass bots index so real players without bots
     // do not pay O(N_random_bots) cost on each outgoing packet.
@@ -397,11 +399,17 @@ void PlayerbotAI::SetMaster(Player* newMaster)
         ObjectGuid botGuid = bot->GetGUID();
 
         ObjectGuid oldMasterGuid;
-        if (oldMaster)
+        if (!previousMasterGuid.IsEmpty())
         {
-            PlayerbotAI* oldMasterAI = GET_PLAYERBOT_AI(oldMaster);
-            if (!oldMasterAI || oldMasterAI->IsRealPlayer())
-                oldMasterGuid = oldMaster->GetGUID();
+            Player* oldMaster = ObjectAccessor::FindConnectedPlayer(previousMasterGuid);
+            if (!oldMaster)
+                oldMasterGuid = previousMasterGuid;
+            else
+            {
+                PlayerbotAI* oldMasterAI = GET_PLAYERBOT_AI(oldMaster);
+                if (!oldMasterAI || oldMasterAI->IsRealPlayer())
+                    oldMasterGuid = previousMasterGuid;
+            }
         }
 
         ObjectGuid newMasterGuid;
@@ -414,6 +422,31 @@ void PlayerbotAI::SetMaster(Player* newMaster)
 
         sRandomPlayerbotMgr.OnRandomBotMasterChanged(botGuid, oldMasterGuid, newMasterGuid);
     }
+}
+
+Player* PlayerbotAI::ResolveMaster() const
+{
+    if (masterGuid.IsEmpty())
+    {
+        const_cast<PlayerbotAI*>(this)->master = nullptr;
+        return nullptr;
+    }
+
+    Player* resolvedMaster = ObjectAccessor::FindConnectedPlayer(masterGuid);
+    if (!resolvedMaster)
+    {
+        const_cast<PlayerbotAI*>(this)->master = nullptr;
+        const_cast<PlayerbotAI*>(this)->masterGuid = ObjectGuid::Empty;
+        return nullptr;
+    }
+
+    const_cast<PlayerbotAI*>(this)->master = resolvedMaster;
+    return resolvedMaster;
+}
+
+Player* PlayerbotAI::GetMaster()
+{
+    return ResolveMaster();
 }
 
 PlayerbotAI::~PlayerbotAI()
@@ -965,6 +998,9 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
     else
         nextAICheckDelay = 0;
 
+    if (IsLogoutQueued())
+        return;
+
     // Early return if bot is in invalid state
     if (!bot || !bot->GetSession() || !bot->IsInWorld() || bot->IsBeingTeleported() ||
         bot->GetSession()->isLogingOut() || bot->IsDuringRemoveFromWorld())
@@ -1255,13 +1291,14 @@ void PlayerbotAI::UpdateAIGroupMaster()
         return;
 
     Group* group = bot->GetGroup();
+    Player* currentMaster = GetMaster();
 
     bool IsRandomBot = sRandomPlayerbotMgr.IsRandomBot(bot);
 
     // If bot is not in group verify that for is RandomBot before clearing  master and resetting.
     if (!group)
     {
-        if (master && IsRandomBot)
+        if (currentMaster && IsRandomBot)
         {
             SetMaster(nullptr);
             Reset(true);
@@ -1272,14 +1309,17 @@ void PlayerbotAI::UpdateAIGroupMaster()
 
     // Bot in BG, but master no longer part of a group: release master
     // Exclude alt and addclass bots as they rely on current (real player) master, security-wise.
-    if (bot->InBattleground() && IsRandomBot && master && !master->GetGroup())
+    if (bot->InBattleground() && IsRandomBot && currentMaster && !currentMaster->GetGroup())
+    {
         SetMaster(nullptr);
+        currentMaster = nullptr;
+    }
 
     PlayerbotAI* masterBotAI = nullptr;
-    if (master)
-        masterBotAI = GET_PLAYERBOT_AI(master);
+    if (currentMaster)
+        masterBotAI = sPlayerbotsMgr.GetPlayerbotAI(currentMaster->GetGUID());
 
-    if (!master || (masterBotAI && !masterBotAI->IsRealPlayer()))
+    if (!currentMaster || (masterBotAI && !masterBotAI->IsRealPlayer()))
     {
         Player* newMaster = FindNewMaster();
         if (newMaster)
@@ -1307,6 +1347,8 @@ void PlayerbotAI::UpdateAIGroupMaster()
 
 void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal)
 {
+    if (IsLogoutQueued())
+        return;
 
     if (!bot || !bot->GetSession())
         return;
@@ -1345,8 +1387,9 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
     if (bot->GetSession()->isLogingOut())
     {
         WorldSession* botWorldSessionPtr = bot->GetSession();
+        Player* currentMaster = GetMaster();
         bool logout = botWorldSessionPtr->ShouldLogOut(time(nullptr));
-        if (!master || !master->GetSession()->GetPlayer())
+        if (!currentMaster || !currentMaster->GetSession() || !currentMaster->GetSession()->GetPlayer())
             logout = true;
 
         if (bot->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_RESTING) || bot->HasUnitState(UNIT_STATE_IN_FLIGHT) ||
@@ -1355,19 +1398,17 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
             logout = true;
         }
 
-        if (master &&
-            (master->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_RESTING) || master->HasUnitState(UNIT_STATE_IN_FLIGHT) ||
-             (master->GetSession() &&
-              master->GetSession()->GetSecurity() >= (AccountTypes)sWorld->getIntConfig(CONFIG_INSTANT_LOGOUT))))
+        if (currentMaster &&
+            (currentMaster->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_RESTING) || currentMaster->HasUnitState(UNIT_STATE_IN_FLIGHT) ||
+             (currentMaster->GetSession() &&
+              currentMaster->GetSession()->GetSecurity() >= (AccountTypes)sWorld->getIntConfig(CONFIG_INSTANT_LOGOUT))))
         {
             logout = true;
         }
 
         if (logout)
         {
-            PlayerbotMgr* masterBotMgr = nullptr;
-            if (master)
-                masterBotMgr = GET_PLAYERBOT_MGR(master);
+            PlayerbotMgr* masterBotMgr = currentMaster ? sPlayerbotsMgr.GetPlayerbotMgr(currentMaster->GetGUID()) : nullptr;
             if (masterBotMgr)
             {
                 masterBotMgr->LogoutPlayerBot(bot->GetGUID());
@@ -1420,7 +1461,7 @@ void PlayerbotAI::HandleCommands()
             continue;
         }
 
-        if (!helper.ParseChatCommand(command, owner) && it->GetType() == CHAT_MSG_WHISPER)
+        if (!helper.ParseChatCommand(command, owner, it->GetType()) && it->GetType() == CHAT_MSG_WHISPER)
         {
             // ostringstream out; out << "Unknown command " << command;
             // TellPlayer(out);
@@ -1454,7 +1495,7 @@ void PlayerbotAI::HandleCommand(uint32 type, const std::string& text, Player& fr
     if (type == CHAT_MSG_SYSTEM)
         return;
 
-    if (filtered.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
+    if (!sPlayerbotAIConfig.commandSeparator.empty() && filtered.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
     {
         std::vector<std::string> commands;
         split(commands, filtered, sPlayerbotAIConfig.commandSeparator.c_str());
@@ -1792,7 +1833,7 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
     if (type == CHAT_MSG_SYSTEM)
         return;
 
-    if (text.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
+    if (!sPlayerbotAIConfig.commandSeparator.empty() && text.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
     {
         std::vector<std::string> commands;
         split(commands, text, sPlayerbotAIConfig.commandSeparator.c_str());
@@ -1895,9 +1936,8 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
             if (type == CHAT_MSG_WHISPER)
                 TellMaster("I'm logging out!");
 
-            PlayerbotMgr* masterBotMgr = nullptr;
-            if (master)
-                masterBotMgr = GET_PLAYERBOT_MGR(master);
+            Player* currentMaster = GetMaster();
+            PlayerbotMgr* masterBotMgr = currentMaster ? sPlayerbotsMgr.GetPlayerbotMgr(currentMaster->GetGUID()) : nullptr;
             if (masterBotMgr)
                 masterBotMgr->LogoutPlayerBot(bot->GetGUID());
         }
@@ -2341,16 +2381,17 @@ void PlayerbotAI::DoNextAction(bool min)
     else if (bot->isAFK())
         bot->ToggleAFK();
 
-    if (master && master->IsInWorld())
+    Player* currentMaster = GetMaster();
+    if (currentMaster && currentMaster->IsInWorld())
     {
-        float distance = ServerFacade::instance().GetDistance2d(bot, master);
+        float distance = ServerFacade::instance().GetDistance2d(bot, currentMaster);
 
-        if (master->m_movementInfo.HasMovementFlag(MOVEMENTFLAG_WALKING) && distance < 20.0f)
+        if (currentMaster->m_movementInfo.HasMovementFlag(MOVEMENTFLAG_WALKING) && distance < 20.0f)
             bot->m_movementInfo.AddMovementFlag(MOVEMENTFLAG_WALKING);
         else
             bot->m_movementInfo.RemoveMovementFlag(MOVEMENTFLAG_WALKING);
 
-        if (master->IsSitState() && nextAICheckDelay < 1000)
+        if (currentMaster->IsSitState() && nextAICheckDelay < 1000)
         {
             if (!bot->isMoving() && distance < 10.0f)
                 bot->SetStandState(UNIT_STAND_STATE_SIT);
@@ -2601,12 +2642,13 @@ bool PlayerbotAI::PlaySound(uint32 emote)
 
 bool PlayerbotAI::PlayEmote(uint32 emote)
 {
+    Player* currentMaster = GetMaster();
     WorldPacket data(SMSG_TEXT_EMOTE);
     data << (TextEmotes)emote;
     data << EmoteAction::GetNumberOfEmoteVariants((TextEmotes)emote, bot->getRace(), bot->getGender());
-    data << ((master && (ServerFacade::instance().GetDistance2d(bot, master) < 30.0f) && urand(0, 1)) ? master->GetGUID()
-             : (bot->GetTarget() && urand(0, 1))                                            ? bot->GetTarget()
-                                                                                            : ObjectGuid::Empty);
+    data << ((currentMaster && (ServerFacade::instance().GetDistance2d(bot, currentMaster) < 30.0f) && urand(0, 1))
+                 ? currentMaster->GetGUID()
+                 : (bot->GetTarget() && urand(0, 1)) ? bot->GetTarget() : ObjectGuid::Empty);
     bot->GetSession()->HandleTextEmoteOpcode(data);
 
     return false;
@@ -3717,7 +3759,7 @@ bool PlayerbotAI::TellMasterNoFacing(std::string const text, PlayerbotSecurityLe
     Player* master = GetMaster();
     PlayerbotAI* masterBotAI = nullptr;
     if (master)
-        masterBotAI = GET_PLAYERBOT_AI(master);
+        masterBotAI = sPlayerbotsMgr.GetPlayerbotAI(master->GetGUID());
 
     if ((!master || (masterBotAI && !masterBotAI->IsRealPlayer())) &&
         (sPlayerbotAIConfig.randomBotSayWithoutMaster || HasStrategy("debug", BOT_STATE_NON_COMBAT)))
@@ -3751,10 +3793,10 @@ bool PlayerbotAI::TellMasterNoFacing(std::string const text, PlayerbotSecurityLe
 bool PlayerbotAI::TellError(std::string const text, PlayerbotSecurityLevel securityLevel)
 {
     Player* master = GetMaster();
-    if (!IsTellAllowed(securityLevel) || !master || GET_PLAYERBOT_AI(master))
+    if (!IsTellAllowed(securityLevel) || !master || sPlayerbotsMgr.GetPlayerbotAI(master->GetGUID()))
         return false;
 
-    if (PlayerbotMgr* mgr = GET_PLAYERBOT_MGR(master))
+    if (PlayerbotMgr* mgr = sPlayerbotsMgr.GetPlayerbotMgr(master->GetGUID()))
         mgr->TellError(bot->GetName(), text);
 
     return false;
@@ -5078,6 +5120,9 @@ bool PlayerbotAI::HasAuraToDispel(Unit* target, uint32 dispelType)
     if (!IsValidPlayer(bot))
         return false;
 
+    if (playerbots::IsInPveArena(bot))
+        return false;
+
     bool isFriend = bot->IsFriendlyTo(target);
 
     Unit::VisibleAuraMap const* visibleAuras = target->GetVisibleAuras();
@@ -5203,16 +5248,20 @@ Player* PlayerbotAI::FindNewMaster()
 
 bool PlayerbotAI::HasRealPlayerMaster() const
 {
-    if (master)
+    if (Player* resolvedMaster = ResolveMaster())
     {
-        PlayerbotAI* masterBotAI = GET_PLAYERBOT_AI(master);
+        PlayerbotAI* masterBotAI = sPlayerbotsMgr.GetPlayerbotAI(resolvedMaster->GetGUID());
         return !masterBotAI || masterBotAI->IsRealPlayer();
     }
 
     return false;
 }
 
-bool PlayerbotAI::HasActivePlayerMaster() { return master && !GET_PLAYERBOT_AI(master); }
+bool PlayerbotAI::HasActivePlayerMaster()
+{
+    Player* resolvedMaster = ResolveMaster();
+    return resolvedMaster && !sPlayerbotsMgr.GetPlayerbotAI(resolvedMaster->GetGUID());
+}
 
 bool PlayerbotAI::IsAlt() { return HasRealPlayerMaster() && !sRandomPlayerbotMgr.IsRandomBot(bot); }
 

@@ -13,7 +13,9 @@
 
 bool SendMailAction::Execute(Event event)
 {
-    uint32 account = bot->GetSession()->GetAccountId();
+    WorldSession* session = GetBotSession();
+
+    uint32 account = session->GetAccountId();
     bool randomBot = sPlayerbotAIConfig.IsInRandomAccountList(account);
 
     GuidVector gos = *context->GetValue<GuidVector>("nearest game objects");

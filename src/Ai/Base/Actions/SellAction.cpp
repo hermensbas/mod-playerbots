@@ -11,76 +11,109 @@
 #include "Playerbots.h"
 #include "ItemPackets.h"
 
-class SellItemsVisitor : public IterateItemsVisitor
+namespace
+{
+class CollectItemGuidsVisitor : public IterateItemsVisitor
 {
 public:
-    SellItemsVisitor(SellAction* action) : IterateItemsVisitor(), action(action) {}
+    std::vector<ObjectGuid> const& GetItemGuids() const { return itemGuids; }
 
-    bool Visit(Item* item) override
+protected:
+    void Remember(Item* item)
     {
-        action->Sell(item);
-        return true;
+        if (item)
+            itemGuids.push_back(item->GetGUID());
     }
 
 private:
-    SellAction* action;
+    std::vector<ObjectGuid> itemGuids;
 };
 
-class SellGrayItemsVisitor : public SellItemsVisitor
+class CollectGrayItemGuidsVisitor : public CollectItemGuidsVisitor
 {
 public:
-    SellGrayItemsVisitor(SellAction* action) : SellItemsVisitor(action) {}
-
     bool Visit(Item* item) override
     {
-        if (item->GetTemplate()->Quality != ITEM_QUALITY_POOR)
+        if (!item)
             return true;
 
-        return SellItemsVisitor::Visit(item);
+        ItemTemplate const* itemTemplate = item->GetTemplate();
+        if (!itemTemplate || itemTemplate->Quality != ITEM_QUALITY_POOR)
+            return true;
+
+        Remember(item);
+        return true;
     }
 };
 
-class SellVendorItemsVisitor : public SellItemsVisitor
+class CollectVendorItemGuidsVisitor : public CollectItemGuidsVisitor
 {
 public:
-    SellVendorItemsVisitor(SellAction* action, AiObjectContext* con) : SellItemsVisitor(action) { context = con; }
-
-    AiObjectContext* context;
+    explicit CollectVendorItemGuidsVisitor(AiObjectContext* con) : context(con) {}
 
     bool Visit(Item* item) override
     {
+        if (!item || !context)
+            return true;
+
         ItemUsage usage = context->GetValue<ItemUsage>("item usage", item->GetEntry())->Get();
         if (usage != ITEM_USAGE_VENDOR && usage != ITEM_USAGE_AH)
             return true;
 
-        return SellItemsVisitor::Visit(item);
+        Remember(item);
+        return true;
     }
+
+private:
+    AiObjectContext* context;
 };
+
+std::vector<ObjectGuid> ToItemGuids(std::vector<Item*> const& items)
+{
+    std::vector<ObjectGuid> itemGuids;
+    itemGuids.reserve(items.size());
+
+    for (Item* item : items)
+        if (item)
+            itemGuids.push_back(item->GetGUID());
+
+    return itemGuids;
+}
+} // namespace
 
 bool SellAction::Execute(Event event)
 {
     std::string const text = event.getParam();
     if (text == "gray" || text == "*")
     {
-        SellGrayItemsVisitor visitor(this);
+        CollectGrayItemGuidsVisitor visitor;
         IterateItems(&visitor);
+
+        for (ObjectGuid const& itemGuid : visitor.GetItemGuids())
+            if (Item* item = bot->GetItemByGuid(itemGuid))
+                Sell(item);
+
         return true;
     }
 
     if (text == "vendor")
     {
-        SellVendorItemsVisitor visitor(this, context);
+        CollectVendorItemGuidsVisitor visitor(context);
         IterateItems(&visitor);
+
+        for (ObjectGuid const& itemGuid : visitor.GetItemGuids())
+            if (Item* item = bot->GetItemByGuid(itemGuid))
+                Sell(item);
+
         return true;
     }
 
     if (text != "")
     {
-        std::vector<Item*> items = parseItems(text, ITERATE_ITEMS_IN_BAGS);
-        for (Item* item : items)
-        {
-            Sell(item);
-        }
+        for (ObjectGuid const& itemGuid : ToItemGuids(parseItems(text, ITERATE_ITEMS_IN_BAGS)))
+            if (Item* item = bot->GetItemByGuid(itemGuid))
+                Sell(item);
+
         return true;
     }
 
@@ -91,17 +124,22 @@ bool SellAction::Execute(Event event)
 void SellAction::Sell(FindItemVisitor* visitor)
 {
     IterateItems(visitor);
-    std::vector<Item*> items = visitor->GetResult();
-    for (Item* item : items)
-    {
-        Sell(item);
-    }
+
+    for (ObjectGuid const& itemGuid : ToItemGuids(visitor->GetResult()))
+        if (Item* item = bot->GetItemByGuid(itemGuid))
+            Sell(item);
 }
 
 void SellAction::Sell(Item* item)
 {
-    std::ostringstream out;
+    if (!item)
+        return;
 
+    ItemTemplate const* itemTemplate = item->GetTemplate();
+    if (!itemTemplate)
+        return;
+
+    std::ostringstream out;
     GuidVector vendors = botAI->GetAiObjectContext()->GetValue<GuidVector>("nearest npcs")->Get();
 
     for (ObjectGuid const vendorguid : vendors)
@@ -112,6 +150,7 @@ void SellAction::Sell(Item* item)
 
         ObjectGuid itemguid = item->GetGUID();
         uint32 count = item->GetCount();
+        std::string itemLabel = chat->FormatItem(itemTemplate);
 
         uint32 botMoney = bot->GetMoney();
 
@@ -127,7 +166,7 @@ void SellAction::Sell(Item* item)
             bot->SetMoney(botMoney);
         }
 
-        out << "Selling " << chat->FormatItem(item->GetTemplate());
+        out << "Selling " << itemLabel;
         botAI->TellMaster(out);
 
         bot->PlayDistanceSound(120);

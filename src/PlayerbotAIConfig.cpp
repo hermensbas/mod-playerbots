@@ -418,6 +418,11 @@ randomBotCountChangeMinInterval =
 
     commandPrefix = sConfigMgr->GetOption<std::string>("AiPlayerbot.CommandPrefix", "");
     commandSeparator = sConfigMgr->GetOption<std::string>("AiPlayerbot.CommandSeparator", "\\\\");
+    if (commandSeparator.empty())
+    {
+        LOG_ERROR("playerbots", "AiPlayerbot.CommandSeparator must not be empty. Falling back to \"\\\\\" to avoid recursive command parsing and stack overflow.");
+        commandSeparator = "\\\\";
+    }
 
     commandServerPort = sConfigMgr->GetOption<int32>("AiPlayerbot.CommandServerPort", 8888);
     perfMonEnabled = sConfigMgr->GetOption<bool>("AiPlayerbot.PerfMonEnabled", false);

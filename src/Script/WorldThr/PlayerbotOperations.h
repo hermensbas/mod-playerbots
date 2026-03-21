@@ -448,6 +448,58 @@ private:
     ObjectGuid m_botGuid;
 };
 
+// Full bot logout operation executed in the world thread to avoid visibility/map-thread use-after-free.
+class BotLogoutOperation : public PlayerbotOperation
+{
+public:
+    explicit BotLogoutOperation(ObjectGuid botGuid) : m_botGuid(botGuid) {}
+
+    bool Execute() override
+    {
+        Player* bot = ObjectAccessor::FindPlayer(m_botGuid);
+        if (!bot)
+            bot = sRandomPlayerbotMgr.GetPlayerBot(m_botGuid);
+
+        if (!bot)
+            return false;
+
+        PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
+        WorldSession* botSession = bot->GetSession();
+        if (!botAI)
+            return false;
+
+        if (!botSession)
+            return true;
+
+        if (botSession->isLogingOut())
+            return true;
+
+        if (Group* group = bot->GetGroup(); group && !bot->InBattleground() && !bot->InBattlegroundQueue() && botAI->HasActivePlayerMaster())
+            PlayerbotRepository::instance().Save(botAI);
+
+        ObjectGuid masterGuid = botAI->GetMasterGuid();
+        sRandomPlayerbotMgr.OnRandomBotLoggedOut(m_botGuid);
+
+        if (PlayerbotMgr* playerbotMgr = PlayerbotsMgr::instance().GetPlayerbotMgr(masterGuid))
+            playerbotMgr->RemoveFromPlayerbotsMap(m_botGuid);
+
+        sRandomPlayerbotMgr.RemoveFromPlayerbotsMap(m_botGuid);
+
+        botAI->TellMaster("Goodbye!");
+        botSession->LogoutPlayer(true);
+        bot->SetSession(nullptr);
+        delete botSession;
+        return true;
+    }
+
+    ObjectGuid GetBotGuid() const override { return m_botGuid; }
+    uint32 GetPriority() const override { return 100; }
+    std::string GetName() const override { return "BotLogout"; }
+
+private:
+    ObjectGuid m_botGuid;
+};
+
 // Add player bot operation (for logging in bots from map threads)
 class AddPlayerBotOperation : public PlayerbotOperation
 {

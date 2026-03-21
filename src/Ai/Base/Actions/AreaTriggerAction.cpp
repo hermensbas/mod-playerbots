@@ -12,6 +12,8 @@
 
 bool ReachAreaTriggerAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     if (botAI->IsRealPlayer())  // Do not trigger own area trigger.
         return false;
 
@@ -29,7 +31,7 @@ bool ReachAreaTriggerAction::Execute(Event event)
         WorldPacket p1(CMSG_AREATRIGGER);
         p1 << triggerId;
         p1.rpos(0);
-        bot->GetSession()->HandleAreaTriggerOpcode(p1);
+        session->HandleAreaTriggerOpcode(p1);
 
         return true;
     }
@@ -60,6 +62,8 @@ bool ReachAreaTriggerAction::Execute(Event event)
 
 bool AreaTriggerAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     LastMovement& movement = context->GetValue<LastMovement&>("last area trigger")->Get();
 
     uint32 triggerId = movement.lastAreaTrigger;
@@ -74,7 +78,7 @@ bool AreaTriggerAction::Execute(Event /*event*/)
     WorldPacket p(CMSG_AREATRIGGER);
     p << triggerId;
     p.rpos(0);
-    bot->GetSession()->HandleAreaTriggerOpcode(p);
+    session->HandleAreaTriggerOpcode(p);
 
     botAI->TellMaster("Hello");
     return true;

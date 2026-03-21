@@ -10,6 +10,8 @@
 
 bool AcceptDuelAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     WorldPacket p(event.getPacket());
 
     ObjectGuid flagGuid;
@@ -23,13 +25,13 @@ bool AcceptDuelAction::Execute(Event event)
     {
         WorldPacket packet(CMSG_DUEL_CANCELLED, 8);
         packet << flagGuid;
-        bot->GetSession()->HandleDuelCancelledOpcode(packet);
+        session->HandleDuelCancelledOpcode(packet);
         return false;
     }
 
     WorldPacket packet(CMSG_DUEL_ACCEPTED, 8);
     packet << flagGuid;
-    bot->GetSession()->HandleDuelAcceptedOpcode(packet);
+    session->HandleDuelAcceptedOpcode(packet);
 
     botAI->ResetStrategies();
     return true;

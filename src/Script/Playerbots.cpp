@@ -247,7 +247,7 @@ public:
     {
         PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
 
-        if (botAI != nullptr)
+        if (botAI != nullptr && !botAI->IsLogoutQueued())
         {
             botAI->UpdateAI(diff);
         }
@@ -335,7 +335,11 @@ public:
             if (bot->GetGuildId() != player->GetGuildId())
                 continue;
 
-            PlayerbotsMgr::instance().GetPlayerbotAI(bot)->HandleCommand(type, msg, player);
+            PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
+            if (botAI == nullptr)
+                continue;
+
+            botAI->HandleCommand(type, msg, player);
         }
 
         return true;

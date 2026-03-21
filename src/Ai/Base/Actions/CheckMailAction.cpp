@@ -12,8 +12,10 @@
 
 bool CheckMailAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     WorldPacket p;
-    bot->GetSession()->HandleQueryNextMailTime(p);
+    session->HandleQueryNextMailTime(p);
 
     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
 

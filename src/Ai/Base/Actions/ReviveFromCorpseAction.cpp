@@ -16,6 +16,8 @@
 
 bool ReviveFromCorpseAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     Player* groupLeader = botAI->GetGroupLeader();
     Corpse* corpse = bot->GetCorpse();
 
@@ -68,7 +70,7 @@ bool ReviveFromCorpseAction::Execute(Event event)
 
     WorldPacket packet(CMSG_RECLAIM_CORPSE);
     packet << bot->GetGUID();
-    bot->GetSession()->HandleReclaimCorpseOpcode(packet);
+    session->HandleReclaimCorpseOpcode(packet);
 
     return true;
 }

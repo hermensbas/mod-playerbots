@@ -10,6 +10,8 @@
 
 bool AcceptBgInvitationAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     uint8 type = 0;                      // arenatype if arena
     uint8 unk2 = 0;                      // unk, can be 0x0 (may be if was invited?) and 0x1
     uint32 bgTypeId_ = BATTLEGROUND_WS;  // type id from dbc
@@ -18,7 +20,7 @@ bool AcceptBgInvitationAction::Execute(Event /*event*/)
 
     WorldPacket packet(CMSG_BATTLEFIELD_PORT, 20);
     packet << type << unk2 << (uint32)bgTypeId_ << unk << action;
-    bot->GetSession()->HandleBattleFieldPortOpcode(packet);
+    session->HandleBattleFieldPortOpcode(packet);
 
     botAI->ResetStrategies();
 

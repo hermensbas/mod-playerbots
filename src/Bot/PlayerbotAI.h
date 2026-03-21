@@ -7,6 +7,7 @@
 #define _PLAYERBOT_PLAYERbotAI_H
 
 #include <array>
+#include <atomic>
 #include <mutex>
 #include <queue>
 #include <stack>
@@ -415,6 +416,13 @@ public:
 
     void UpdateAI(uint32 elapsed, bool minimal = false) override;
     void UpdateAIInternal(uint32 elapsed, bool minimal = false) override;
+    bool MarkLogoutQueued()
+    {
+        bool expected = false;
+        return logoutQueued_.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
+    }
+    bool IsLogoutQueued() const { return logoutQueued_.load(std::memory_order_acquire); }
+    void ClearLogoutQueued() { logoutQueued_.store(false, std::memory_order_release); }
 
     // Schedule a delayed PvE re-equip after leaving BG/arena (teleport/loading safe).
     // Used by PvP gear swap logic to avoid re-gearing during map transfer.
@@ -584,7 +592,8 @@ public:
     float GetRange(std::string const type);
 
     Player* GetBot() { return bot; }
-    Player* GetMaster() { return master; }
+    Player* GetMaster();
+    ObjectGuid GetMasterGuid() const { return masterGuid; }
     Player* FindNewMaster();
 
     // Checks if the bot is really a player. Players always have themselves as master.
@@ -733,8 +742,11 @@ private:
                !player->IsBeingTeleported();
     }
 protected:
+    Player* ResolveMaster() const;
+
     Player* bot;
     Player* master;
+    ObjectGuid masterGuid;
     uint32 accountId;
     AiObjectContext* aiObjectContext;
     Engine* currentEngine;
@@ -753,6 +765,7 @@ protected:
     static std::set<std::string> unsecuredCommands;
     bool allowActive[MAX_ACTIVITY_TYPE];
     time_t allowActiveCheckTimer[MAX_ACTIVITY_TYPE];
+    std::atomic<bool> logoutQueued_{false};
     bool inCombat = false;
     BotCheatMask cheatMask = BotCheatMask::none;
     Position jumpDestination = Position();

@@ -10,6 +10,8 @@
 
 bool AcceptResurrectAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     if (bot->IsAlive())
         return false;
 
@@ -21,7 +23,7 @@ bool AcceptResurrectAction::Execute(Event event)
     WorldPacket packet(CMSG_RESURRECT_RESPONSE, 8 + 1);
     packet << guid;
     packet << uint8(1);                                        // accept
-    bot->GetSession()->HandleResurrectResponseOpcode(packet);  // queue the packet to get around race condition
+    session->HandleResurrectResponseOpcode(packet);  // queue the packet to get around race condition
 
     return true;
 }

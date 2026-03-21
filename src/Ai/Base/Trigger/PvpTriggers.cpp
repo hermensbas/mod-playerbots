@@ -9,6 +9,7 @@
 #include "BattlegroundEY.h"
 #include "BattlegroundMgr.h"
 #include "BattlegroundWS.h"
+#include "PveArenaCompat.h"
 #include "Playerbots.h"
 #include "ServerFacade.h"
 #include "BattlegroundAV.h"
@@ -18,6 +19,9 @@ bool EnemyPlayerNear::IsActive() { return AI_VALUE(Unit*, "enemy player target")
 
 bool PlayerHasNoFlag::IsActive()
 {
+    if (playerbots::IsInPveArena(botAI->GetBot()))
+        return false;
+
     if (botAI->GetBot()->InBattleground())
     {
         if (botAI->GetBot()->GetBattlegroundTypeId() == BattlegroundTypeId::BATTLEGROUND_WS)
@@ -39,10 +43,16 @@ bool PlayerHasNoFlag::IsActive()
     return false;
 }
 
-bool PlayerIsInBattleground::IsActive() { return botAI->GetBot()->InBattleground(); }
+bool PlayerIsInBattleground::IsActive()
+{
+    return botAI->GetBot()->InBattleground() && !playerbots::IsInPveArena(botAI->GetBot());
+}
 
 bool BgWaitingTrigger::IsActive()
 {
+    if (playerbots::IsInPveArena(bot))
+        return false;
+
     if (bot->InBattleground())
     {
         if (bot->GetBattleground() && bot->GetBattleground()->GetStatus() == STATUS_WAIT_JOIN)
@@ -54,6 +64,9 @@ bool BgWaitingTrigger::IsActive()
 
 bool BgActiveTrigger::IsActive()
 {
+    if (playerbots::IsInPveArena(bot))
+        return false;
+
     if (bot->InBattleground())
     {
         if (bot->GetBattleground() && bot->GetBattleground()->GetStatus() == STATUS_IN_PROGRESS)
@@ -94,10 +107,16 @@ bool BgInviteActiveTrigger::IsActive()
     return false;
 }
 
-bool InsideBGTrigger::IsActive() { return bot->InBattleground() && bot->GetBattleground(); }
+bool InsideBGTrigger::IsActive()
+{
+    return bot->InBattleground() && bot->GetBattleground() && !playerbots::IsInPveArena(bot);
+}
 
 bool PlayerIsInBattlegroundWithoutFlag::IsActive()
 {
+    if (playerbots::IsInPveArena(botAI->GetBot()))
+        return false;
+
     if (botAI->GetBot()->InBattleground())
     {
         if (botAI->GetBot()->GetBattlegroundTypeId() == BattlegroundTypeId::BATTLEGROUND_WS)

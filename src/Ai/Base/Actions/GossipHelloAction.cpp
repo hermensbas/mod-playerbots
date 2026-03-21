@@ -79,6 +79,8 @@ void GossipHelloAction::TellGossipMenus()
 
 bool GossipHelloAction::ProcessGossip(int32 menuToSelect, bool silent)
 {
+    WorldSession* session = GetBotSession();
+
     GossipMenu& menu = bot->PlayerTalkClass->GetGossipMenu();
     if (menuToSelect != -1 && !menu.GetItem(menuToSelect))
     {
@@ -92,7 +94,7 @@ bool GossipHelloAction::ProcessGossip(int32 menuToSelect, bool silent)
     p << GetMaster()->GetTarget();
     p << menu.GetMenuId() << menuToSelect;
     p << code;
-    bot->GetSession()->HandleGossipSelectOptionOpcode(p);
+    session->HandleGossipSelectOptionOpcode(p);
 
     if (!silent)
         TellGossipMenus();
@@ -102,6 +104,8 @@ bool GossipHelloAction::ProcessGossip(int32 menuToSelect, bool silent)
 
 bool GossipHelloAction::Execute(ObjectGuid guid, int32 menuToSelect, bool silent)
 {
+    WorldSession* session = GetBotSession();
+
     if (!guid)
         return false;
 
@@ -124,7 +128,7 @@ bool GossipHelloAction::Execute(ObjectGuid guid, int32 menuToSelect, bool silent
     {
         WorldPacket p1;
         p1 << guid;
-        bot->GetSession()->HandleGossipHelloOpcode(p1);
+        session->HandleGossipHelloOpcode(p1);
         bot->SetFacingToObject(pCreature);
 
         if (!silent)

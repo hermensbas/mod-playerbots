@@ -18,6 +18,8 @@
 
 bool TradeStatusAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     Player* trader = bot->GetTrader();
     Player* master = GetMaster();
     if (!trader)
@@ -46,7 +48,7 @@ bool TradeStatusAction::Execute(Event event)
         WorldPacket p;
         uint32 status = 0;
         p << status;
-        bot->GetSession()->HandleCancelTradeOpcode(p);
+        session->HandleCancelTradeOpcode(p);
         return false;
     }
 
@@ -76,7 +78,7 @@ bool TradeStatusAction::Execute(Event event)
                     takenItemIds[item->GetTemplate()->ItemId] += item->GetCount();
             }
 
-            bot->GetSession()->HandleAcceptTradeOpcode(p);
+            session->HandleAcceptTradeOpcode(p);
             if (bot->GetTradeData())
             {
                 sRandomPlayerbotMgr.SetTradeDiscount(bot, trader, discount);
@@ -126,12 +128,14 @@ bool TradeStatusAction::Execute(Event event)
 
 void TradeStatusAction::BeginTrade()
 {
+    WorldSession* session = GetBotSession();
+
     Player* trader = bot->GetTrader();
     if (!trader || GET_PLAYERBOT_AI(bot->GetTrader()))
         return;
 
     WorldPacket p;
-    bot->GetSession()->HandleBeginTradeOpcode(p);
+    session->HandleBeginTradeOpcode(p);
 
     ListItemsVisitor visitor;
     IterateItems(&visitor);
@@ -187,11 +191,9 @@ bool TradeStatusAction::CheckTrade()
         }
         return isGettingItem;
     }
-    if (!bot->GetSession())
-    {
-        return false;
-    }
-    uint32 accountId = bot->GetSession()->GetAccountId();
+    WorldSession* session = GetBotSession();
+
+    uint32 accountId = session->GetAccountId();
     if (!sPlayerbotAIConfig.IsInRandomAccountList(accountId))
     {
         int32 botItemsMoney = CalculateCost(bot, true);

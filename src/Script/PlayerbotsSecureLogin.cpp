@@ -2,17 +2,18 @@
 #include "Opcodes.h"
 #include "Player.h"
 #include "ObjectAccessor.h"
+#include "WorldSession.h"
 
 #include "Playerbots.h"
 
 namespace
 {
-    static Player* FindOnlineAltbotByGuid(ObjectGuid guid)
+    static Player* FindConnectedAltbotByGuid(ObjectGuid guid)
     {
         if (!guid)
             return nullptr;
 
-        Player* p = ObjectAccessor::FindPlayer(guid);
+        Player* p = ObjectAccessor::FindConnectedPlayer(guid);
         if (!p)
             return nullptr;
 
@@ -52,7 +53,7 @@ public:
     PlayerbotsSecureLoginServerScript()
         : ServerScript("PlayerbotsSecureLoginServerScript", { SERVERHOOK_CAN_PACKET_RECEIVE }) {}
 
-    bool CanPacketReceive(WorldSession* /*session*/, WorldPacket& packet) override
+    bool CanPacketReceive(WorldSession* session, WorldPacket& packet) override
     {
         if (packet.GetOpcode() != CMSG_PLAYER_LOGIN)
             return true;
@@ -65,11 +66,25 @@ public:
         if (!loginGuid)
             return true;
 
-        Player* existingAltbot = FindOnlineAltbotByGuid(loginGuid);
-        if (existingAltbot)
-            ForceLogoutViaPlayerbotHolder(existingAltbot);
+        Player* existingAltbot = FindConnectedAltbotByGuid(loginGuid);
+        if (!existingAltbot)
+            return true;
 
-        return true;
+        ForceLogoutViaPlayerbotHolder(existingAltbot);
+
+        // The bot logout is deferred onto the world-thread queue, so the character is still
+        // connected right now. Reject this login attempt and let the client retry after the bot
+        // instance is fully removed; otherwise we can transiently create two live Player objects
+        // with the same GUID and corrupt shared state.
+        if (session)
+        {
+            LOG_WARN("playerbots",
+                     "Rejected login for {} because an altbot instance of the same character is still connected; bot logout was requested and the client must retry.",
+                     loginGuid.ToString());
+            session->SendCharLoginFailed(LoginFailureReason::DuplicateCharacter);
+        }
+
+        return false;
     }
 };
 
