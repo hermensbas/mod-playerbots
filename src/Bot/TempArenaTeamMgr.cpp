@@ -22,6 +22,7 @@ namespace
 {
 constexpr uint32 TEMP_ARENA_TEAM_STALE_MS = 15000;
 constexpr uint32 TEMP_ARENA_TEAM_UPDATE_MS = 2000;
+constexpr uint32 TEMP_ARENA_TEAM_OPPONENT_GRACE_MS = 20000;
 constexpr uint32 TEMP_ARENA_TEAM_CANCEL_TELEPORT_DELAY_S = 5;
 
 class TempArenaTeam final : public ArenaTeam
@@ -169,6 +170,7 @@ bool TempArenaTeamMgr::PrepareForLeader(Player* leader, BattlegroundQueueTypeId 
     ctx.requiredSize = requiredSize;
     ctx.createdAtMs = nowMs;
     ctx.lastTouchedMs = nowMs;
+    ctx.lastOpponentSeenMs = nowMs;
     ctx.leaderGuid = leader->GetGUID();
     ctx.teamName = team->GetName();
     ctx.team = team;
@@ -273,6 +275,30 @@ void TempArenaTeamMgr::SetBattlemasterGuidForLeader(Player* leader, ObjectGuid c
         return;
 
     ctx->battlemasterGuid = battlemasterGuid;
+}
+
+void TempArenaTeamMgr::MarkOpposingQueueSeen(Player* leader)
+{
+    if (!leader)
+        return;
+
+    TempArenaTeamContext* ctx = GetContextByLeader(leader->GetGUID());
+    if (!ctx)
+        return;
+
+    ctx->lastOpponentSeenMs = getMSTime();
+}
+
+bool TempArenaTeamMgr::HasRecentOpposingQueueForLeader(Player* leader) const
+{
+    if (!leader)
+        return false;
+
+    TempArenaTeamContext const* ctx = GetContextByLeader(leader->GetGUID());
+    if (!ctx)
+        return false;
+
+    return (getMSTime() - ctx->lastOpponentSeenMs) < TEMP_ARENA_TEAM_OPPONENT_GRACE_MS;
 }
 
 bool TempArenaTeamMgr::HasTempArenaTeamForLeader(Player* leader, ArenaType arenaType) const

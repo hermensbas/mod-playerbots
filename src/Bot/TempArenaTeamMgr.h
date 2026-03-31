@@ -21,6 +21,7 @@ struct TempArenaTeamContext
     uint32 requiredSize = 0;
     uint32 createdAtMs = 0;
     uint32 lastTouchedMs = 0;
+    uint32 lastOpponentSeenMs = 0;
     uint32 groupFormationQueuedUntilMs = 0;
 
     ObjectGuid leaderGuid = ObjectGuid::Empty;
@@ -42,6 +43,8 @@ public:
     ArenaTeam* GetArenaTeamForPlayer(Player* player, uint8 slot) const;
     ObjectGuid GetBattlemasterGuidForLeader(Player* leader) const;
     void SetBattlemasterGuidForLeader(Player* leader, ObjectGuid const& battlemasterGuid);
+    void MarkOpposingQueueSeen(Player* leader);
+    bool HasRecentOpposingQueueForLeader(Player* leader) const;
     bool HasTempArenaTeamForLeader(Player* leader, ArenaType arenaType) const;
     bool IsTempArenaTeam(ArenaTeam const* team) const;
     bool IsTempArenaTeamId(uint32 teamId) const;

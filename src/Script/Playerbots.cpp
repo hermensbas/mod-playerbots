@@ -670,6 +670,7 @@ public:
     {
         PlayerbotHolder::UpdateInitQueue(diff);
         sRandomPlayerbotMgr.UpdateSessions();  // Per-bot updates only
+        PlayerbotHolder::ProcessPendingSafeLogouts();
     }
 
     void OnPlayerbotUpdateSessions(Player* player) override

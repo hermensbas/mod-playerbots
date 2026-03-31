@@ -5,8 +5,10 @@
 
 #include "PlayerbotMgr.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <deque>
@@ -44,6 +46,23 @@
 namespace
 {
 constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
+
+std::mutex pendingSafeLogoutMutex;
+std::unordered_set<ObjectGuid> pendingSafeLogoutGuids;
+std::atomic<bool> hasPendingSafeLogouts{false};
+
+void QueuePendingSafeLogout(ObjectGuid guid)
+{
+    if (!guid)
+        return;
+
+    {
+        std::lock_guard<std::mutex> guard(pendingSafeLogoutMutex);
+        pendingSafeLogoutGuids.insert(guid);
+    }
+
+    hasPendingSafeLogouts.store(true, std::memory_order_release);
+}
 
 template <class F>
 void ForEachControlledRandomBot(Player* master, F&& fn)
@@ -108,6 +127,57 @@ void ProcessBotLogoutInSafeWorldUpdate(Player* bot, PlayerbotAI* botAI)
 
     botAI->TellMaster("Goodbye!");
     botSession->LogoutPlayer(true);
+}
+
+bool QueueSafeBotLogoutRequest(ObjectGuid guid)
+{
+    Player* bot = ObjectAccessor::FindConnectedPlayer(guid);
+    if (!bot)
+        return false;
+
+    PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(guid);
+    if (!botAI)
+        return false;
+
+    WorldSession* botSession = bot->GetSession();
+    if (!botSession || botSession->isLogingOut())
+        return false;
+
+    if (botAI->MarkLogoutQueued())
+        bot->SaveToDB(false, false);
+
+    QueuePendingSafeLogout(guid);
+    return true;
+}
+
+bool HasConnectedRealMaster(PlayerbotAI* botAI)
+{
+    if (!botAI)
+        return false;
+
+    ObjectGuid const masterGuid = botAI->GetMasterGuid();
+    if (!masterGuid)
+        return false;
+
+    return ObjectAccessor::FindConnectedPlayer(masterGuid) != nullptr;
+}
+
+bool IsTrackedByAnyLiveHolder(ObjectGuid guid, PlayerbotAI* botAI)
+{
+    if (sRandomPlayerbotMgr.GetPlayerBot(guid))
+        return true;
+
+    if (!botAI)
+        return false;
+
+    ObjectGuid const masterGuid = botAI->GetMasterGuid();
+    if (!masterGuid)
+        return false;
+
+    if (PlayerbotMgr* masterMgr = sPlayerbotsMgr.GetPlayerbotMgr(masterGuid))
+        return masterMgr->GetPlayerBot(guid) != nullptr;
+
+    return false;
 }
 } // namespace
 
@@ -721,19 +791,60 @@ void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
 {
     if (Player* bot = GetPlayerBot(guid))
     {
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (!botAI)
-            return;
-
         LOG_DEBUG("playerbots", "Bot {} logging out", bot->GetName().c_str());
-        WorldSession* botWorldSessionPtr = bot->GetSession();
-        if (!botWorldSessionPtr || botWorldSessionPtr->isLogingOut())
-            return;
+        RequestSafeBotLogout(guid);
+    }
+}
 
-        if (!botAI->MarkLogoutQueued())
-            return;
+bool PlayerbotHolder::RequestSafeBotLogout(ObjectGuid guid)
+{
+    return QueueSafeBotLogoutRequest(guid);
+}
 
-        bot->SaveToDB(false, false);
+void PlayerbotHolder::ProcessPendingSafeLogouts()
+{
+    if (!hasPendingSafeLogouts.load(std::memory_order_acquire))
+        return;
+
+    std::vector<ObjectGuid> pendingGuids;
+    {
+        std::lock_guard<std::mutex> guard(pendingSafeLogoutMutex);
+        if (pendingSafeLogoutGuids.empty())
+        {
+            hasPendingSafeLogouts.store(false, std::memory_order_release);
+            return;
+        }
+
+        pendingGuids.reserve(pendingSafeLogoutGuids.size());
+        for (ObjectGuid const& guid : pendingSafeLogoutGuids)
+            pendingGuids.push_back(guid);
+
+        pendingSafeLogoutGuids.clear();
+        hasPendingSafeLogouts.store(false, std::memory_order_release);
+    }
+
+    for (ObjectGuid const& guid : pendingGuids)
+    {
+        Player* bot = ObjectAccessor::FindConnectedPlayer(guid);
+        if (!bot)
+            continue;
+
+        PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(guid);
+        if (!botAI || !botAI->IsLogoutQueued())
+            continue;
+
+        if (IsTrackedByAnyLiveHolder(guid, botAI) && HasConnectedRealMaster(botAI))
+        {
+            QueuePendingSafeLogout(guid);
+            continue;
+        }
+
+        ProcessBotLogoutInSafeWorldUpdate(bot, botAI);
+
+        Player* stillConnectedBot = ObjectAccessor::FindConnectedPlayer(guid);
+        PlayerbotAI* stillConnectedAI = PlayerbotsMgr::instance().GetPlayerbotAI(guid);
+        if (stillConnectedBot && stillConnectedAI && stillConnectedAI->IsLogoutQueued())
+            QueuePendingSafeLogout(guid);
     }
 }
 

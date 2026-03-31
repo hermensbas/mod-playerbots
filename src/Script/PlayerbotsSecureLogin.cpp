@@ -29,21 +29,7 @@ namespace
         if (!target)
             return;
 
-        PlayerbotAI* ai = GET_PLAYERBOT_AI(target);
-
-        if (!ai)
-            return;
-
-        if (Player* master = ai->GetMaster())
-        {
-            if (PlayerbotMgr* mgr = GET_PLAYERBOT_MGR(master))
-            {
-                mgr->LogoutPlayerBot(target->GetGUID());
-                return;
-            }
-        }
-
-        sRandomPlayerbotMgr.LogoutPlayerBot(target->GetGUID());
+        PlayerbotHolder::RequestSafeBotLogout(target->GetGUID());
     }
 }
 

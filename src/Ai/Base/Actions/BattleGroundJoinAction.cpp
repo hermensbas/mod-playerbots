@@ -640,10 +640,23 @@ bool BGJoinAction::shouldJoinBg(BattlegroundQueueTypeId queueTypeId, Battlegroun
 
             if (sTempArenaTeamMgr.HasTempArenaTeamForLeader(bot, type))
             {
-                if (!waitingRealOpposingGroups)
+                if (waitingRealOpposingGroups)
                 {
+                    sTempArenaTeamMgr.MarkOpposingQueueSeen(bot);
+                }
+                else if (!sTempArenaTeamMgr.HasRecentOpposingQueueForLeader(bot))
+                {
+                    LOG_DEBUG("playerbots",
+                        "Bot {} <{}>: releasing temp arena team for {} because no real opposing groups remain in queue",
+                        bot->GetGUID().ToString().c_str(), bot->GetName().c_str(), uint32(queueTypeId));
                     sTempArenaTeamMgr.ReleasePlayer(bot);
                     return false;
+                }
+                else
+                {
+                    LOG_DEBUG("playerbots",
+                        "Bot {} <{}>: keeping temp arena team for {} during opponent grace window",
+                        bot->GetGUID().ToString().c_str(), bot->GetName().c_str(), uint32(queueTypeId));
                 }
 
                 ratedList.push_back(queueTypeId);
@@ -1051,6 +1064,10 @@ bool BGJoinAction::JoinQueue(uint32 type)
                 grp->CanJoinBattlegroundQueue(bg, queueTypeId, arenaType, arenaType, true, arenaslot);
             if (joinResult <= 0)
             {
+                LOG_DEBUG("playerbots",
+                    "Bot {} <{}>: temp rated arena group cannot join queue {} (result {}, arenaTeamId {}, members {})",
+                    bot->GetGUID().ToString().c_str(), bot->GetName().c_str(), uint32(queueTypeId), int32(joinResult),
+                    arenaTeamId, grp->GetMembersCount());
                 botAI->GetAiObjectContext()->GetValue<uint32>("bg type")->Set(0);
                 return false;
             }
