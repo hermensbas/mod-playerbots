@@ -309,6 +309,9 @@ public:
 
     std::string const Format() override;
     Unit* Get() override;
+
+protected:
+    ObjectGuid valueGuid = ObjectGuid::Empty;
 };
 
 class CDPairCalculatedValue : public CalculatedValue<CreatureData const*>

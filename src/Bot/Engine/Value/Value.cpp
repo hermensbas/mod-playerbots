@@ -5,6 +5,7 @@
 
 #include "Value.h"
 
+#include "ObjectAccessor.h"
 #include "PerfMonitor.h"
 #include "Playerbots.h"
 #include "Timer.h"
@@ -121,11 +122,15 @@ std::string const ObjectGuidListCalculatedValue::Format()
 
 Unit* UnitCalculatedValue::Get()
 {
+    bool recalculated = false;
+
     if (checkInterval < 2)
     {
         PerfMonitorOperation* pmo = sPerfMonitor.start(
             PERF_MON_VALUE, this->getName(), this->context ? &this->context->performanceStack : nullptr);
         value = Calculate();
+        valueGuid = value ? value->GetGUID() : ObjectGuid::Empty;
+        recalculated = true;
         if (pmo)
             pmo->finish();
     }
@@ -138,14 +143,38 @@ Unit* UnitCalculatedValue::Get()
             PerfMonitorOperation* pmo = sPerfMonitor.start(
                 PERF_MON_VALUE, this->getName(), this->context ? &this->context->performanceStack : nullptr);
             value = Calculate();
+            valueGuid = value ? value->GetGUID() : ObjectGuid::Empty;
+            recalculated = true;
             if (pmo)
                 pmo->finish();
         }
     }
-    // Prevent crashing by InWorld check
-    if (value && value->IsInWorld())
-        return value;
-    return nullptr;
+
+    if (recalculated)
+    {
+        if (value && value->IsInWorld() && !value->IsDuringRemoveFromWorld())
+            return value;
+
+        value = nullptr;
+        valueGuid = ObjectGuid::Empty;
+        return nullptr;
+    }
+
+    if (!bot || valueGuid.IsEmpty())
+        return nullptr;
+
+    Unit* resolved = ObjectAccessor::GetUnit(*bot, valueGuid);
+    if (!resolved || !resolved->IsInWorld() || resolved->IsDuringRemoveFromWorld())
+    {
+        value = nullptr;
+        if (!resolved)
+            valueGuid = ObjectGuid::Empty;
+
+        return nullptr;
+    }
+
+    value = resolved;
+    return resolved;
 }
 
 Unit* UnitManualSetValue::Get()
