@@ -5389,29 +5389,41 @@ GuilderType PlayerbotAI::GetGuilderType()
 
 bool PlayerbotAI::HasPlayerNearby(WorldPosition* pos, float range)
 {
+    Map* map = bot ? bot->GetMap() : nullptr;
+    if (!pos || !bot || !map)
+        return false;
+
     float sqRange = range * range;
-    bool nearPlayer = false;
-    for (auto& player : sRandomPlayerbotMgr.GetPlayers())
+    for (auto const& itr : map->GetPlayers())
     {
-        if (!player->IsGameMaster() || player->isGMVisible())
-        {
-            if (player->GetMapId() != bot->GetMapId())
-                continue;
+        Player* player = itr.GetSource();
+        if (!player || player == bot || !player->GetSession() || !player->IsInWorld() || player->IsDuringRemoveFromWorld() ||
+            player->IsBeingTeleported() || player->GetSession()->isLogingOut())
+            continue;
 
-            if (pos->sqDistance(WorldPosition(player)) < sqRange)
-                nearPlayer = true;
+        PlayerbotAI* playerAI = GET_PLAYERBOT_AI(player);
+        if (playerAI && !playerAI->IsRealPlayer() && !playerAI->HasRealPlayerMaster())
+            continue;
 
-            // if player is far check farsight/cinematic camera
-            WorldObject* viewObj = player->GetViewpoint();
-            if (viewObj && viewObj != player)
-            {
-                if (pos->sqDistance(WorldPosition(viewObj)) < sqRange)
-                    nearPlayer = true;
-            }
-        }
+        if (player->IsGameMaster() && !player->isGMVisible())
+            continue;
+
+        if (pos->sqDistance(WorldPosition(player)) < sqRange)
+            return true;
+
+        // If the player is far away, also respect farsight/cinematic camera, but only while the
+        // player and the viewpoint are both fully valid world objects on this same map thread.
+        WorldObject* viewObj = player->GetViewpoint();
+        Unit* viewUnit = viewObj ? viewObj->ToUnit() : nullptr;
+        if (!viewObj || viewObj == player || !viewObj->IsInWorld() || (viewUnit && viewUnit->IsDuringRemoveFromWorld()) ||
+            viewObj->GetMapId() != bot->GetMapId())
+            continue;
+
+        if (pos->sqDistance(WorldPosition(viewObj)) < sqRange)
+            return true;
     }
 
-    return nearPlayer;
+    return false;
 }
 
 bool PlayerbotAI::HasPlayerNearby(float range)
@@ -5422,18 +5434,33 @@ bool PlayerbotAI::HasPlayerNearby(float range)
 
 bool PlayerbotAI::HasManyPlayersNearby(uint32 trigerrValue, float range)
 {
+    Map* map = bot ? bot->GetMap() : nullptr;
+    if (!bot || !map)
+        return false;
+
     float sqRange = range * range;
     uint32 found = 0;
 
-    for (auto& player : sRandomPlayerbotMgr.GetPlayers())
+    for (auto const& itr : map->GetPlayers())
     {
-        if ((!player->IsGameMaster() || player->isGMVisible()) && ServerFacade::instance().GetDistance2d(player, bot) < sqRange)
-        {
-            found++;
+        Player* player = itr.GetSource();
+        if (!player || player == bot || !player->GetSession() || !player->IsInWorld() || player->IsDuringRemoveFromWorld() ||
+            player->IsBeingTeleported() || player->GetSession()->isLogingOut())
+            continue;
 
-            if (found >= trigerrValue)
-                return true;
-        }
+        PlayerbotAI* playerAI = GET_PLAYERBOT_AI(player);
+        if (playerAI && !playerAI->IsRealPlayer() && !playerAI->HasRealPlayerMaster())
+            continue;
+
+        if (player->IsGameMaster() && !player->isGMVisible())
+            continue;
+
+        if (ServerFacade::instance().GetDistance2d(player, bot) >= sqRange)
+            continue;
+
+        found++;
+        if (found >= trigerrValue)
+            return true;
     }
 
     return false;
@@ -5473,9 +5500,11 @@ inline bool ZoneHasRealPlayers(Player* bot)
         return false;
     }
 
-    for (Player* player : sRandomPlayerbotMgr.GetPlayers())
+    for (auto const& itr : map->GetPlayers())
     {
-        if (player->GetMapId() != bot->GetMapId())
+        Player* player = itr.GetSource();
+        if (!player || player == bot || !player->GetSession() || !player->IsInWorld() || player->IsDuringRemoveFromWorld() ||
+            player->IsBeingTeleported() || player->GetSession()->isLogingOut())
             continue;
 
         if (player->IsGameMaster() && !player->IsVisible())
@@ -5649,9 +5678,12 @@ bool PlayerbotAI::AllowActive(ActivityType activityType)
         if (!bot->GetGUID())
             return false;
 
-        for (auto& player : sRandomPlayerbotMgr.GetPlayers())
+        std::shared_lock<std::shared_mutex> lock(*HashMapHolder<Player>::GetLock());
+        HashMapHolder<Player>::MapType const& players = ObjectAccessor::GetPlayers();
+        for (auto const& itr : players)
         {
-            if (!player || !player->GetSession() || !player->IsInWorld() || player->IsDuringRemoveFromWorld() ||
+            Player* player = itr.second;
+            if (!player || player == bot || !player->GetSession() || !player->IsInWorld() || player->IsDuringRemoveFromWorld() ||
                 player->GetSession()->isLogingOut())
                 continue;
 
