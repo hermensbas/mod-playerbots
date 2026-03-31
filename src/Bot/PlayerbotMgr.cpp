@@ -74,6 +74,39 @@ void ForEachControlledRandomBot(Player* master, F&& fn)
 
     tlsControlledGuids.swap(controlledGuids);
 }
+
+void ProcessBotLogoutInSafeWorldUpdate(Player* bot, PlayerbotAI* botAI)
+{
+    if (!bot || !botAI)
+        return;
+
+    WorldSession* botSession = bot->GetSession();
+    if (!botSession)
+    {
+        botAI->ClearLogoutQueued();
+        return;
+    }
+
+    if (bot->IsDuringRemoveFromWorld())
+        return;
+
+    // Finalize any pending teleport inside the regular playerbot session update flow
+    // before we tear the character down via LogoutPlayer().
+    if (bot->IsBeingTeleported())
+    {
+        botAI->HandleTeleportAck();
+        return;
+    }
+
+    if (Group* group = bot->GetGroup(); group && !bot->InBattleground() && !bot->InBattlegroundQueue() &&
+        botAI->HasActivePlayerMaster())
+    {
+        PlayerbotRepository::instance().Save(botAI);
+    }
+
+    botAI->TellMaster("Goodbye!");
+    botSession->LogoutPlayer(true);
+}
 } // namespace
 
 class BotInitGuard
@@ -566,12 +599,23 @@ void PlayerbotHolder::HandlePlayerBotLoginCallback(PlayerbotLoginQueryHolder con
 
 void PlayerbotHolder::UpdateSessions()
 {
-    for (PlayerBotMap::const_iterator itr = GetPlayerBotsBegin(); itr != GetPlayerBotsEnd(); ++itr)
+    for (PlayerBotMap::const_iterator itr = GetPlayerBotsBegin(); itr != GetPlayerBotsEnd();)
     {
         Player* const bot = itr->second;
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (!botAI || botAI->IsLogoutQueued())
+        ++itr;
+
+        if (!bot)
             continue;
+
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (!botAI)
+            continue;
+
+        if (botAI->IsLogoutQueued())
+        {
+            ProcessBotLogoutInSafeWorldUpdate(bot, botAI);
+            continue;
+        }
 
         if (bot->IsBeingTeleported())
         {
@@ -688,10 +732,6 @@ void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
             return;
 
         bot->SaveToDB(false, false);
-
-        auto logoutOp = std::make_unique<BotLogoutOperation>(guid);
-        if (!PlayerbotWorldThreadProcessor::instance().QueueOperation(std::move(logoutOp)))
-            botAI->ClearLogoutQueued();
     }
 }
 

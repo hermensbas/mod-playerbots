@@ -54,6 +54,7 @@
 #include "SayAction.h"
 #include "ScriptMgr.h"
 #include "ServerFacade.h"
+#include "TempArenaTeamMgr.h"
 #include "SharedDefines.h"
 #include "SocialMgr.h"
 #include "SpellAuraEffects.h"
@@ -389,8 +390,15 @@ void PlayerbotAI::SetMaster(Player* newMaster)
         return;
 
     ObjectGuid previousMasterGuid = masterGuid;
+    Player* previousMaster = master;
     master = newMaster;
     masterGuid = newMaster ? newMaster->GetGUID() : ObjectGuid::Empty;
+
+    if (bot && newMaster && sRandomPlayerbotMgr.IsAddclassBot(bot))
+    {
+        if (!previousMaster || previousMaster->GetGUID() != newMaster->GetGUID())
+            sTempArenaTeamMgr.ReleasePlayer(bot);
+    }
 
     // Maintain fast master->controlled random/addclass bots index so real players without bots
     // do not pay O(N_random_bots) cost on each outgoing packet.
@@ -1424,6 +1432,8 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
         return;
     }
 
+    ProcessDeferredWorldThreadOps();
+
     botOutgoingPacketHandlers.Handle(helper);
     masterIncomingPacketHandlers.Handle(helper);
     masterOutgoingPacketHandlers.Handle(helper);
@@ -1432,6 +1442,41 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
 
     if (pmo)
         pmo->finish();
+}
+
+void PlayerbotAI::RequestDeferredReset()
+{
+    deferredWorldThreadOps_.fetch_or(DEFERRED_OP_RESET, std::memory_order_release);
+}
+
+void PlayerbotAI::RequestDeferredBgJoin(uint32 queueTypeId, uint32 arenaType)
+{
+    deferredBgQueueTypeId_.store(queueTypeId, std::memory_order_relaxed);
+    deferredArenaType_.store(arenaType, std::memory_order_relaxed);
+    deferredWorldThreadOps_.fetch_or(DEFERRED_OP_BG_JOIN, std::memory_order_release);
+}
+
+void PlayerbotAI::ProcessDeferredWorldThreadOps()
+{
+    uint32 pendingOps = deferredWorldThreadOps_.load(std::memory_order_acquire);
+    if (pendingOps == DEFERRED_OP_NONE)
+        return;
+
+    pendingOps = deferredWorldThreadOps_.exchange(DEFERRED_OP_NONE, std::memory_order_acq_rel);
+    if (pendingOps == DEFERRED_OP_NONE)
+        return;
+
+    // World-thread operations must not mutate Engine/AI state directly.
+    // Consume their intents here on the regular AI update thread instead.
+    if (pendingOps & DEFERRED_OP_RESET)
+        Reset();
+
+    if (pendingOps & DEFERRED_OP_BG_JOIN)
+    {
+        aiObjectContext->GetValue<uint32>("arena type")->Set(deferredArenaType_.load(std::memory_order_relaxed));
+        aiObjectContext->GetValue<uint32>("bg type")->Set(deferredBgQueueTypeId_.load(std::memory_order_relaxed));
+        DoSpecificAction("bg join", Event(), true);
+    }
 }
 
 void PlayerbotAI::HandleCommands()

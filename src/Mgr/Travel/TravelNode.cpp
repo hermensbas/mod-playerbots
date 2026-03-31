@@ -1533,6 +1533,7 @@ TravelNode* TravelNodeMap::addRandomExtNode(TravelNode* startNode)
 void TravelNodeMap::manageNodes(Unit* bot, bool mapFull)
 {
     bool rePrint = false;
+    bool shouldPrint = false;
 
     if (!bot->GetMap())
         return;
@@ -1574,18 +1575,13 @@ void TravelNodeMap::manageNodes(Unit* bot, bool mapFull)
             }
         }
 
-        if (rePrint && (mapFull || !urand(0, 20)))
-            printMap();
+        shouldPrint = rePrint && (mapFull || !urand(0, 20));
 
         m_nMapMtx.unlock();
     }
 
-    TravelNodeMap::instance().m_nMapMtx.lock_shared();
-
-    if (!rePrint && mapFull)
+    if (shouldPrint || (!rePrint && mapFull))
         printMap();
-
-    m_nMapMtx.unlock_shared();
 }
 
 void TravelNodeMap::generateNpcNodes()
@@ -2065,20 +2061,101 @@ void TravelNodeMap::printMap()
     if (!sPlayerbotAIConfig.hasLog("travelNodes.csv") && !sPlayerbotAIConfig.hasLog("travelPaths.csv"))
         return;
 
+    std::vector<std::string> nodeLines;
+    std::vector<std::string> pathLines;
+
+    {
+        std::shared_lock<std::shared_timed_mutex> lock(m_nMapMtx);
+        std::vector<TravelNode*> anodes = m_nodes;
+
+        nodeLines.reserve(anodes.size());
+
+        for (TravelNode* node : anodes)
+        {
+            if (!node)
+                continue;
+
+            uint32 mapSize = node->getNodeMap(true).size();
+
+            std::ostringstream out;
+            std::string name = node->getName();
+            name.erase(std::remove(name.begin(), name.end(), '\"'), name.end());
+            out << name.c_str() << ",";
+            out << std::fixed << std::setprecision(2);
+            node->getPosition()->printWKT(out);
+            out << node->getZ() << ",";
+            out << node->getO() << ",";
+            out << (node->isImportant() ? 1 : 0) << ",";
+            out << mapSize;
+            nodeLines.push_back(out.str());
+
+            for (TravelNode* endNode : anodes)
+            {
+                if (!endNode || endNode == node)
+                    continue;
+
+                if (!node->hasPathTo(endNode))
+                    continue;
+
+                TravelNodePath* path = node->getPathTo(endNode);
+                if (!path)
+                    continue;
+
+                if (!node->hasLinkTo(endNode) && urand(0, 20))
+                    continue;
+
+                std::vector<WorldPosition> ppath = path->getPath();
+
+                if (ppath.size() < 2 && node->hasLinkTo(endNode))
+                {
+                    ppath.push_back(*node->getPosition());
+                    ppath.push_back(*endNode->getPosition());
+                }
+
+                if (ppath.size() <= 1)
+                    continue;
+
+                uint32 pathType = 1;
+                if (!node->hasLinkTo(endNode))
+                    pathType = 0;
+                else if (path->getPathType() == TravelNodePathType::transport)
+                    pathType = 2;
+                else if (path->getPathType() == TravelNodePathType::portal && node->getMapId() == endNode->getMapId())
+                    pathType = 3;
+                else if (path->getPathType() == TravelNodePathType::portal)
+                    pathType = 4;
+                else if (path->getPathType() == TravelNodePathType::flightPath)
+                    pathType = 5;
+                else if (!path->getComplete())
+                    pathType = 6;
+
+                std::ostringstream pathOut;
+                pathOut << pathType << ",";
+                pathOut << std::fixed << std::setprecision(2);
+                node->getPosition()->printWKT(ppath, pathOut, 1);
+                pathOut << path->getPathObject() << ",";
+                pathOut << path->getDistance() << ",";
+                pathOut << path->getCost() << ",";
+                pathOut << (path->getComplete() ? 0 : 1) << ",";
+                pathOut << std::to_string(path->getMaxLevelCreature()[0]) << ",";
+                pathOut << std::to_string(path->getMaxLevelCreature()[1]) << ",";
+                pathOut << std::to_string(path->getMaxLevelCreature()[2]);
+                pathLines.push_back(pathOut.str());
+            }
+        }
+    }
+
     printf("\r [Qgis] \r\x3D");
     fflush(stdout);
 
     sPlayerbotAIConfig.openLog("travelNodes.csv", "w");
     sPlayerbotAIConfig.openLog("travelPaths.csv", "w");
 
-    std::vector<TravelNode*> anodes = getNodes();
+    for (std::string const& line : nodeLines)
+        sPlayerbotAIConfig.log("travelNodes.csv", line.c_str());
 
-    //uint32 nr = 0; //not used, line marked for removal.
-
-    for (auto& node : anodes)
-    {
-        node->print(false);
-    }
+    for (std::string const& line : pathLines)
+        sPlayerbotAIConfig.log("travelPaths.csv", line.c_str());
 }
 
 void TravelNodeMap::printNodeStore()

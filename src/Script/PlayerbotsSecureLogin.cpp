@@ -71,10 +71,10 @@ public:
 
         ForceLogoutViaPlayerbotHolder(existingAltbot);
 
-        // The bot logout is deferred onto the world-thread queue, so the character is still
-        // connected right now. Reject this login attempt and let the client retry after the bot
-        // instance is fully removed; otherwise we can transiently create two live Player objects
-        // with the same GUID and corrupt shared state.
+        // Bot logout is deferred until the next safe playerbot session update, so the character
+        // is still connected right now. Reject this login attempt and let the client retry after
+        // the bot instance is fully removed; otherwise we can transiently create two live Player
+        // objects with the same GUID and corrupt shared state.
         if (session)
         {
             LOG_WARN("playerbots",

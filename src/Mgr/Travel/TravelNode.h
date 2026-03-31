@@ -6,6 +6,7 @@
 #ifndef _PLAYERBOT_TRAVELNODE_H
 #define _PLAYERBOT_TRAVELNODE_H
 
+#include <mutex>
 #include <shared_mutex>
 
 #include "TravelMgr.h"
@@ -489,16 +490,14 @@ public:
     void removeNode(TravelNode* node);
     bool removeNodes()
     {
-        if (m_nMapMtx.try_lock_for(std::chrono::seconds(10)))
-        {
-            for (auto& node : m_nodes)
-                removeNode(node);
+        std::unique_lock<std::shared_timed_mutex> lock(m_nMapMtx, std::defer_lock);
+        if (!lock.try_lock_for(std::chrono::milliseconds(25)))
+            return false;
 
-            m_nMapMtx.unlock();
-            return true;
-        }
+        while (!m_nodes.empty())
+            removeNode(m_nodes.back());
 
-        return false;
+        return true;
     };
 
     void fullLinkNode(TravelNode* startNode, Unit* bot);

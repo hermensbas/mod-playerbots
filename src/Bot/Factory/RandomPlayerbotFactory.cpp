@@ -789,6 +789,10 @@ std::string const RandomPlayerbotFactory::CreateRandomGuildName()
 
 void RandomPlayerbotFactory::CreateRandomArenaTeams(ArenaType type, uint32 count)
 {
+    (void)type;
+    (void)count;
+    return;
+
     uint32 maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
     bool allowArenaTeams = (maxLevel == 70 || maxLevel == 80);
 

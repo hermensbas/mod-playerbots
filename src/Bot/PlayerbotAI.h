@@ -461,6 +461,8 @@ public:
     void HandleMasterIncomingPacket(WorldPacket const& packet);
     void HandleMasterOutgoingPacket(WorldPacket const& packet);
     void HandleTeleportAck();
+    void RequestDeferredReset();
+    void RequestDeferredBgJoin(uint32 queueTypeId, uint32 arenaType = 1);
     void ChangeEngine(BotState type);
     void ChangeEngineOnCombat();
     void ChangeEngineOnNonCombat();
@@ -681,6 +683,14 @@ private:
     void HandleCommands();
     void HandleCommand(uint32 type, const std::string& text, Player& fromPlayer, const uint32 lang = LANG_UNIVERSAL);
     bool _isBotInitializing = false;
+    void ProcessDeferredWorldThreadOps();
+
+    enum DeferredWorldThreadOp : uint32
+    {
+        DEFERRED_OP_NONE = 0x0,
+        DEFERRED_OP_RESET = 0x1,
+        DEFERRED_OP_BG_JOIN = 0x2
+    };
 
     // Pending PvE re-equip after leaving BG/arena (deferred until bot is back in world).
     uint32 pendingPveGearReequipEpoch_ = 0;
@@ -766,6 +776,9 @@ protected:
     bool allowActive[MAX_ACTIVITY_TYPE];
     time_t allowActiveCheckTimer[MAX_ACTIVITY_TYPE];
     std::atomic<bool> logoutQueued_{false};
+    std::atomic<uint32> deferredWorldThreadOps_{DEFERRED_OP_NONE};
+    std::atomic<uint32> deferredBgQueueTypeId_{0};
+    std::atomic<uint32> deferredArenaType_{0};
     bool inCombat = false;
     BotCheatMask cheatMask = BotCheatMask::none;
     Position jumpDestination = Position();

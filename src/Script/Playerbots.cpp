@@ -24,6 +24,9 @@
 #include "DatabaseEnv.h"
 #include "DatabaseLoader.h"
 #include "GuildTaskMgr.h"
+#include "ArenaTeam.h"
+#include "ArenaScript.h"
+#include "BattlegroundMgr.h"
 #include "PlayerScript.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotGuildMgr.h"
@@ -32,6 +35,7 @@
 #include "RandomPlayerbotMgr.h"
 #include "ScriptMgr.h"
 #include "PlayerbotCommandScript.h"
+#include "TempArenaTeamMgr.h"
 #include "cmath"
 #include "BattleGroundTactics.h"
 
@@ -105,6 +109,21 @@ void LeaveBotsFromMastersBattleground(Player* master, Battleground* bg)
         bot->LeaveBattleground();
     });
 }
+
+void CleanupLoggedOutBotFromPlayerbotHolders(Player* player, PlayerbotAI* botAI)
+{
+    if (!player || !botAI)
+        return;
+
+    ObjectGuid const botGuid = player->GetGUID();
+
+    sRandomPlayerbotMgr.OnRandomBotLoggedOut(botGuid);
+
+    if (PlayerbotMgr* playerbotMgr = PlayerbotsMgr::instance().GetPlayerbotMgr(botAI->GetMasterGuid()))
+        playerbotMgr->RemoveFromPlayerbotsMap(botGuid);
+
+    sRandomPlayerbotMgr.RemoveFromPlayerbotsMap(botGuid);
+}
 } // namespace
 
 class PlayerbotsDatabaseScript : public DatabaseScript
@@ -161,6 +180,8 @@ public:
         PLAYERHOOK_CAN_PLAYER_USE_GROUP_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_CHANNEL_CHAT,
+        PLAYERHOOK_ON_GET_ARENA_TEAM_ID,
+        PLAYERHOOK_NOT_SET_ARENA_TEAM_INFO_FIELD,
         PLAYERHOOK_ON_GIVE_EXP,
         PLAYERHOOK_ON_BEFORE_TELEPORT,
         PLAYERHOOK_ON_REMOVE_FROM_BATTLEGROUND
@@ -260,11 +281,35 @@ public:
         if (!player || !bg)
             return;
 
+        if (bg->isArena())
+        {
+            WorldSession* playerSession = player->GetSession();
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(player);
+
+            if (playerSession && playerSession->IsBot() && sRandomPlayerbotMgr.IsRandomBot(player) &&
+                !sRandomPlayerbotMgr.IsAddclassBot(player) && botAI && !botAI->HasRealPlayerMaster())
+            {
+                // Let arena cleanup finish, then use the normal random-bot teleport flow.
+                sRandomPlayerbotMgr.ScheduleTeleport(player->GetGUID().GetCounter(), 5);
+            }
+        }
+
         WorldSession* session = player->GetSession();
         if (!session || session->IsBot())
             return;
 
         LeaveBotsFromMastersBattleground(player, bg);
+    }
+
+    void OnPlayerGetArenaTeamId(Player* player, uint8 slot, uint32& result) override
+    {
+        if (uint32 tempTeamId = sTempArenaTeamMgr.GetArenaTeamIdForPlayer(player, slot))
+            result = tempTeamId;
+    }
+
+    bool OnPlayerNotSetArenaTeamInfoField(Player* player, uint8 slot, ArenaTeamInfoType /*type*/, uint32 /*value*/) override
+    {
+        return !sTempArenaTeamMgr.ShouldSuppressArenaTeamInfoField(player, slot);
     }
 
     bool OnPlayerCanUseChat(Player* player, uint32 type, uint32 /*lang*/, std::string& msg, Player* receiver) override
@@ -470,6 +515,39 @@ public:
     {
         PlayerbotWorldThreadProcessor::instance().Update(diff);
         sRandomPlayerbotMgr.UpdateAI(diff);  // World thread only
+        sTempArenaTeamMgr.Update(diff);
+    }
+};
+
+class PlayerbotsArenaScript : public ArenaScript
+{
+public:
+    PlayerbotsArenaScript() : ArenaScript("PlayerbotsArenaScript", {
+        ARENAHOOK_CAN_SAVE_TO_DB,
+        ARENAHOOK_ON_BEFORE_TEAM_MEMBER_UPDATE,
+        ARENAHOOK_CAN_SAVE_ARENA_STATS_FOR_MEMBER
+    }) {}
+
+    bool CanSaveToDB(ArenaTeam* team) override
+    {
+        if (sTempArenaTeamMgr.IsTempArenaTeam(team))
+            return false;
+
+        return true;
+    }
+
+    bool OnBeforeArenaTeamMemberUpdate(ArenaTeam* team, Player* /*player*/, bool /*won*/, uint32 /*opponentMatchmakerRating*/,
+                                       int32 /*matchmakerChange*/) override
+    {
+        return !sTempArenaTeamMgr.IsTempArenaTeam(team);
+    }
+
+    bool CanSaveArenaStatsForMember(ArenaTeam* team, ObjectGuid /*playerGuid*/) override
+    {
+        if (sTempArenaTeamMgr.IsTempArenaTeam(team))
+            return false;
+
+        return true;
     }
 };
 
@@ -558,10 +636,15 @@ public:
 
     void OnPlayerbotLogout(Player* player) override
     {
+        PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+        if (botAI && !botAI->IsRealPlayer())
+        {
+            CleanupLoggedOutBotFromPlayerbotHolders(player, botAI);
+            return;
+        }
+
         if (PlayerbotMgr* playerbotMgr = GET_PLAYERBOT_MGR(player))
         {
-            PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
-
             if (botAI == nullptr || botAI->IsRealPlayer())
             {
                 playerbotMgr->LogoutAllBots();
@@ -612,7 +695,11 @@ public:
         bgStrategies[bg->GetInstanceID()] = data;
     }
 
-    void OnBattlegroundEnd(Battleground* bg, TeamId /*winnerTeam*/) override { bgStrategies.erase(bg->GetInstanceID()); }
+    void OnBattlegroundEnd(Battleground* bg, TeamId /*winnerTeam*/) override
+    {
+        bgStrategies.erase(bg->GetInstanceID());
+        sTempArenaTeamMgr.HandleBattlegroundEnd(bg);
+    }
 };
 
 // Workaround for missing InitEnabledHooksIfNeeded for new BattlefieldScript in ScriptMgr
@@ -631,6 +718,7 @@ void AddPlayerbotsScripts()
     new PlayerbotsBattlefieldScript();
     new PlayerbotsDatabaseScript();
     new PlayerbotsPlayerScript();
+    new PlayerbotsArenaScript();
     new PlayerbotsMiscScript();
     new PlayerbotsServerScript();
     new PlayerbotsWorldScript();
