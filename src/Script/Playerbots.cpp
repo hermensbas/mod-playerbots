@@ -41,6 +41,41 @@
 
 namespace
 {
+constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
+
+bool IsWintergraspRestrictedControlledBot(Player* player)
+{
+    if (!player)
+        return false;
+
+    WorldSession* session = player->GetSession();
+    if (!session || !session->IsBot())
+        return false;
+
+    PlayerbotAI* botAI = GET_PLAYERBOT_AI(player);
+    if (!botAI || botAI->IsRealPlayer())
+        return false;
+
+    return botAI->HasRealPlayerMaster() && !botAI->IsAlt();
+}
+
+void RelocateControlledBotFromWintergrasp(Player* player)
+{
+    if (!player || player->GetZoneId() != WINTERGRASP_ZONE_ID)
+        return;
+
+    if (!IsWintergraspRestrictedControlledBot(player))
+        return;
+
+    if (!player->IsInWorld() || player->IsDuringRemoveFromWorld() || player->IsBeingTeleported() ||
+        player->IsBeingTeleportedFar())
+    {
+        return;
+    }
+
+    sRandomPlayerbotMgr.ForceRandomTeleportForLevel(player);
+}
+
 template <class F>
 void ForEachMasterControlledBot(Player* master, F&& fn)
 {
@@ -174,6 +209,7 @@ public:
     PlayerbotsPlayerScript() : PlayerScript("PlayerbotsPlayerScript", {
         PLAYERHOOK_ON_LOGIN,
         PLAYERHOOK_ON_AFTER_UPDATE,
+        PLAYERHOOK_ON_UPDATE_ZONE,
         PLAYERHOOK_ON_BEFORE_CRITERIA_PROGRESS,
         PLAYERHOOK_ON_BEFORE_ACHI_COMPLETE,
         PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT,
@@ -213,6 +249,12 @@ public:
                     "|cff00ff00Playerbots:|r The server is configured with " + maxAllowedBotCount + " bots.");
             }
         }
+    }
+
+    void OnPlayerUpdateZone(Player* player, uint32 newZone, uint32 /*newArea*/) override
+    {
+        if (newZone == WINTERGRASP_ZONE_ID)
+            RelocateControlledBotFromWintergrasp(player);
     }
 
     bool OnPlayerBeforeTeleport(Player* /*player*/, uint32 /*mapid*/, float /*x*/, float /*y*/, float /*z*/,
@@ -263,6 +305,9 @@ public:
 
     void OnPlayerAfterUpdate(Player* player, uint32 diff) override
     {
+        if (player && player->GetZoneId() == WINTERGRASP_ZONE_ID)
+            RelocateControlledBotFromWintergrasp(player);
+
         PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
 
         if (botAI != nullptr && !botAI->IsLogoutQueued())

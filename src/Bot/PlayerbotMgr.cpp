@@ -43,6 +43,8 @@
 
 namespace
 {
+constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
+
 template <class F>
 void ForEachControlledRandomBot(Player* master, F&& fn)
 {
@@ -1371,6 +1373,11 @@ std::vector<std::string> PlayerbotHolder::HandlePlayerbotCommand(char const* arg
         if (sPlayerbotAIConfig.addClassCommand == 0 && master->GetSession()->GetSecurity() < SEC_GAMEMASTER)
         {
             messages.push_back("You do not have permission to create bot by addclass command");
+            return messages;
+        }
+        if (master->GetZoneId() == WINTERGRASP_ZONE_ID)
+        {
+            messages.push_back("You cannot create addclass bots in Wintergrasp");
             return messages;
         }
         if (!charname)

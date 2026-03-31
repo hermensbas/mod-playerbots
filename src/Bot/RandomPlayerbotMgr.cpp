@@ -1946,7 +1946,7 @@ void RandomPlayerbotMgr::Revive(Player* player)
     RandomTeleportGrindForLevel(player);
 }
 
-void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation>& locs, bool hearth)
+void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation>& locs, bool hearth, bool force)
 {
     // ignore when alrdy teleported or not in the world yet.
     if (bot->IsBeingTeleported() || !bot->IsInWorld())
@@ -1965,16 +1965,19 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation>&
         return;
 
     // ignore when in group (e.g. world, dungeons, raids) and leader is not a player.
-    if (bot->GetGroup() && !bot->GetGroup()->IsLeader(bot->GetGUID()))
+    if (!force && bot->GetGroup() && !bot->GetGroup()->IsLeader(bot->GetGUID()))
         return;
 
     PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
     if (botAI)
     {
         // ignore when in when taxi with boat/zeppelin and has players nearby
-        if (bot->HasUnitMovementFlag(MOVEMENTFLAG_ONTRANSPORT) && bot->HasUnitState(UNIT_STATE_IGNORE_PATHFINDING) &&
+        if (!force &&
+            bot->HasUnitMovementFlag(MOVEMENTFLAG_ONTRANSPORT) && bot->HasUnitState(UNIT_STATE_IGNORE_PATHFINDING) &&
             botAI->HasPlayerNearby())
+        {
             return;
+        }
     }
 
     // if (sPlayerbotAIConfig.randomBotRpgChance < 0)
@@ -2064,7 +2067,7 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation>&
         }
 
         // Prevent blink to be detected by visible real players
-        if (botAI->HasPlayerNearby(150.0f))
+        if (!force && botAI->HasPlayerNearby(150.0f))
         {
             break;
         }
@@ -2157,6 +2160,26 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
     if (!locs.empty())
     {
         RandomTeleport(bot, locs, false);
+        return;
+    }
+}
+
+void RandomPlayerbotMgr::ForceRandomTeleportForLevel(Player* bot)
+{
+    if (bot->InBattleground())
+        return;
+
+    std::vector<WorldLocation> locs = sTravelMgr.GetCityLocations(bot);
+    if (!locs.empty())
+    {
+        RandomTeleport(bot, locs, true, true);
+        return;
+    }
+
+    locs = sTravelMgr.GetTeleportLocations(bot);
+    if (!locs.empty())
+    {
+        RandomTeleport(bot, locs, false, true);
         return;
     }
 }

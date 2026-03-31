@@ -14,6 +14,11 @@
 #include "Playerbots.h"
 #include "PositionValue.h"
 
+namespace
+{
+constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
+}
+
 bool UseMeetingStoneAction::Execute(Event event)
 {
     Player* master = GetMaster();
@@ -157,6 +162,14 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
     if (summoner->InBattleground() || summoner->InArena())
     {
         botAI->TellError("You cannot summon me in battlegrounds or arenas");
+        return false;
+    }
+
+    // Wintergrasp is a battlefield zone, so it bypasses the regular battleground/arena checks above.
+    // Keep altbots allowed there, but block summon-based entry for player-controlled summon/random bots.
+    if (summoner->GetZoneId() == WINTERGRASP_ZONE_ID && !botAI->IsAlt())
+    {
+        botAI->TellError("You cannot summon non-alt bots in Wintergrasp");
         return false;
     }
 
