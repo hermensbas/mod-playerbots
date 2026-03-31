@@ -2116,24 +2116,14 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation>&
                   zone->area_name[locale], area->ID, area->area_name[locale], zone->area_level, area->area_level, x, y,
                   z, i + 1, tlocs.size());
 
-        if (hearth)
-        {
-            bot->SetHomebind(loc, zone->ID);
-        }
-
         // Prevent blink to be detected by visible real players
         if (!force && botAI->HasPlayerNearby(150.0f))
         {
             break;
         }
 
-        bot->GetMotionMaster()->Clear();
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
         if (botAI)
-            botAI->Reset(true);
-        bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
-        bot->TeleportTo(loc.GetMapId(), x, y, z, 0);
-        bot->SendMovementFlagUpdate();
+            botAI->RequestDeferredTeleport(loc.GetMapId(), x, y, z, 0.0f, hearth, zone->ID);
 
         if (pmo)
             pmo->finish();

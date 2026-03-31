@@ -463,6 +463,8 @@ public:
     void HandleTeleportAck();
     void RequestDeferredReset();
     void RequestDeferredBgJoin(uint32 queueTypeId, uint32 arenaType = 1);
+    void RequestDeferredTeleport(uint32 mapId, float x, float y, float z, float orientation, bool updateHomebind = false,
+                                 uint32 homebindZoneId = 0);
     void ChangeEngine(BotState type);
     void ChangeEngineOnCombat();
     void ChangeEngineOnNonCombat();
@@ -689,7 +691,8 @@ private:
     {
         DEFERRED_OP_NONE = 0x0,
         DEFERRED_OP_RESET = 0x1,
-        DEFERRED_OP_BG_JOIN = 0x2
+        DEFERRED_OP_BG_JOIN = 0x2,
+        DEFERRED_OP_TELEPORT = 0x4
     };
 
     // Pending PvE re-equip after leaving BG/arena (deferred until bot is back in world).
@@ -779,6 +782,13 @@ protected:
     std::atomic<uint32> deferredWorldThreadOps_{DEFERRED_OP_NONE};
     std::atomic<uint32> deferredBgQueueTypeId_{0};
     std::atomic<uint32> deferredArenaType_{0};
+    std::atomic<uint32> deferredTeleportMapId_{0};
+    std::atomic<float> deferredTeleportX_{0.0f};
+    std::atomic<float> deferredTeleportY_{0.0f};
+    std::atomic<float> deferredTeleportZ_{0.0f};
+    std::atomic<float> deferredTeleportO_{0.0f};
+    std::atomic<uint32> deferredTeleportHomebindZoneId_{0};
+    std::atomic<bool> deferredTeleportUpdateHomebind_{false};
     bool inCombat = false;
     BotCheatMask cheatMask = BotCheatMask::none;
     Position jumpDestination = Position();

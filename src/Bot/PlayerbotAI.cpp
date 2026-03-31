@@ -1456,6 +1456,19 @@ void PlayerbotAI::RequestDeferredBgJoin(uint32 queueTypeId, uint32 arenaType)
     deferredWorldThreadOps_.fetch_or(DEFERRED_OP_BG_JOIN, std::memory_order_release);
 }
 
+void PlayerbotAI::RequestDeferredTeleport(uint32 mapId, float x, float y, float z, float orientation,
+                                          bool updateHomebind, uint32 homebindZoneId)
+{
+    deferredTeleportMapId_.store(mapId, std::memory_order_relaxed);
+    deferredTeleportX_.store(x, std::memory_order_relaxed);
+    deferredTeleportY_.store(y, std::memory_order_relaxed);
+    deferredTeleportZ_.store(z, std::memory_order_relaxed);
+    deferredTeleportO_.store(orientation, std::memory_order_relaxed);
+    deferredTeleportUpdateHomebind_.store(updateHomebind, std::memory_order_relaxed);
+    deferredTeleportHomebindZoneId_.store(homebindZoneId, std::memory_order_relaxed);
+    deferredWorldThreadOps_.fetch_or(DEFERRED_OP_TELEPORT, std::memory_order_release);
+}
+
 void PlayerbotAI::ProcessDeferredWorldThreadOps()
 {
     uint32 pendingOps = deferredWorldThreadOps_.load(std::memory_order_acquire);
@@ -1476,6 +1489,29 @@ void PlayerbotAI::ProcessDeferredWorldThreadOps()
         aiObjectContext->GetValue<uint32>("arena type")->Set(deferredArenaType_.load(std::memory_order_relaxed));
         aiObjectContext->GetValue<uint32>("bg type")->Set(deferredBgQueueTypeId_.load(std::memory_order_relaxed));
         DoSpecificAction("bg join", Event(), true);
+    }
+
+    if (pendingOps & DEFERRED_OP_TELEPORT)
+    {
+        uint32 const mapId = deferredTeleportMapId_.load(std::memory_order_relaxed);
+        float const x = deferredTeleportX_.load(std::memory_order_relaxed);
+        float const y = deferredTeleportY_.load(std::memory_order_relaxed);
+        float const z = deferredTeleportZ_.load(std::memory_order_relaxed);
+        float const orientation = deferredTeleportO_.load(std::memory_order_relaxed);
+        bool const updateHomebind = deferredTeleportUpdateHomebind_.load(std::memory_order_relaxed);
+        uint32 const homebindZoneId = deferredTeleportHomebindZoneId_.load(std::memory_order_relaxed);
+
+        if (updateHomebind)
+        {
+            WorldLocation homebindLocation(mapId, x, y, z, orientation);
+            bot->SetHomebind(homebindLocation, homebindZoneId);
+        }
+
+        bot->GetMotionMaster()->Clear();
+        Reset(true);
+        bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
+        bot->TeleportTo(mapId, x, y, z, orientation);
+        bot->SendMovementFlagUpdate();
     }
 }
 
