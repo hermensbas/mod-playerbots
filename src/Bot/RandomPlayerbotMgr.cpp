@@ -13,6 +13,7 @@
 #include <ctime>
 #include <iomanip>
 #include <random>
+#include <shared_mutex>
 
 #include "AiFactory.h"
 #include "Battleground.h"
@@ -28,6 +29,7 @@
 #include "MapMgr.h"
 #include "NewRpgInfo.h"
 #include "NewRpgStrategy.h"
+#include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "PerfMonitor.h"
 #include "Player.h"
@@ -87,6 +89,44 @@ void activateCheckPlayersThread()
 {
     boost::thread t(CheckPlayersThread);
     t.detach();
+}
+
+namespace
+{
+std::vector<ObjectGuid> GetTrackedRealPlayerGuidsSnapshot(RandomPlayerbotMgr& mgr)
+{
+    std::vector<ObjectGuid> guids;
+
+    std::shared_lock<std::shared_mutex> lock(*HashMapHolder<Player>::GetLock());
+    HashMapHolder<Player>::MapType const& onlinePlayers = ObjectAccessor::GetPlayers();
+    guids.reserve(onlinePlayers.size());
+
+    for (auto const& itr : onlinePlayers)
+    {
+        Player* player = itr.second;
+        if (!player || mgr.IsRandomBot(player))
+            continue;
+
+        guids.push_back(player->GetGUID());
+    }
+
+    return guids;
+}
+
+bool HasTrackedRealPlayersOnline(RandomPlayerbotMgr& mgr)
+{
+    std::shared_lock<std::shared_mutex> lock(*HashMapHolder<Player>::GetLock());
+    HashMapHolder<Player>::MapType const& onlinePlayers = ObjectAccessor::GetPlayers();
+
+    for (auto const& itr : onlinePlayers)
+    {
+        Player* player = itr.second;
+        if (player && !mgr.IsRandomBot(player))
+            return true;
+    }
+
+    return false;
+}
 }
 
 class botPIDImpl
@@ -252,10 +292,10 @@ void RandomPlayerbotMgr::LogPlayerLocation()
                 sPlayerbotAIConfig.log("player_location.csv", out.str().c_str());
             }
 
-            for (auto i : GetPlayers())
+            for (ObjectGuid const& playerGuid : GetTrackedRealPlayerGuidsSnapshot(*this))
             {
-                Player* bot = i;
-                if (!bot)
+                Player* bot = ObjectAccessor::FindConnectedPlayer(playerGuid);
+                if (!bot || !bot->GetSession() || bot->IsDuringRemoveFromWorld() || bot->GetSession()->isLogingOut())
                     continue;
 
                 std::ostringstream out;
@@ -455,7 +495,7 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool /*minimal*/)
         AddRandomBots();
     }
 
-    if (sPlayerbotAIConfig.syncLevelWithPlayers && !players.empty())
+    if (sPlayerbotAIConfig.syncLevelWithPlayers && HasTrackedRealPlayersOnline(*this))
     {
         if (time(nullptr) > (PlayersCheckTimer + 60))
             sRandomPlayerbotMgr.CheckPlayers();
@@ -651,7 +691,7 @@ void RandomPlayerbotMgr::BeginSlicedCycle()
     }
 
     // Mirror periodic checks from the original code path (run at most once per logical tick).
-    if (sPlayerbotAIConfig.syncLevelWithPlayers && !players.empty())
+    if (sPlayerbotAIConfig.syncLevelWithPlayers && HasTrackedRealPlayersOnline(*this))
     {
         if (now > (PlayersCheckTimer + 60))
             sRandomPlayerbotMgr.CheckPlayers();
@@ -1300,8 +1340,12 @@ void RandomPlayerbotMgr::CheckBgQueue()
 
     // Process real players and populate Battleground Data with player/queue count
     // Opens a queue for bots to join
-    for (Player* player : players)
+    for (ObjectGuid const& playerGuid : GetTrackedRealPlayerGuidsSnapshot(*this))
     {
+        Player* player = ObjectAccessor::FindConnectedPlayer(playerGuid);
+        if (!player || !player->GetSession() || player->IsDuringRemoveFromWorld() || player->GetSession()->isLogingOut())
+            continue;
+
         // Skip player if not currently in a queue
         if (!player->InBattlegroundQueue())
             continue;
@@ -1639,10 +1683,11 @@ void RandomPlayerbotMgr::CheckLfgQueue()
     LfgDungeons[TEAM_ALLIANCE].clear();
     LfgDungeons[TEAM_HORDE].clear();
 
-    for (std::vector<Player*>::iterator i = players.begin(); i != players.end(); ++i)
+    for (ObjectGuid const& playerGuid : GetTrackedRealPlayerGuidsSnapshot(*this))
     {
-        Player* player = *i;
-        if (!player || !player->IsInWorld())
+        Player* player = ObjectAccessor::FindConnectedPlayer(playerGuid);
+        if (!player || !player->GetSession() || !player->IsInWorld() || player->IsDuringRemoveFromWorld() ||
+            player->GetSession()->isLogingOut())
             continue;
 
         Group* group = player->GetGroup();
@@ -1676,9 +1721,11 @@ void RandomPlayerbotMgr::CheckPlayers()
     if (!playersLevel)
         playersLevel = sPlayerbotAIConfig.randombotStartingLevel;
 
-    for (std::vector<Player*>::iterator i = players.begin(); i != players.end(); ++i)
+    for (ObjectGuid const& playerGuid : GetTrackedRealPlayerGuidsSnapshot(*this))
     {
-        Player* player = *i;
+        Player* player = ObjectAccessor::FindConnectedPlayer(playerGuid);
+        if (!player || !player->GetSession() || player->IsDuringRemoveFromWorld() || player->GetSession()->isLogingOut())
+            continue;
 
         if (player->IsGameMaster())
             continue;
@@ -3176,11 +3223,21 @@ void RandomPlayerbotMgr::OnPlayerLoginError(uint32 bot)
 
 Player* RandomPlayerbotMgr::GetRandomPlayer()
 {
-    if (players.empty())
+    std::vector<ObjectGuid> trackedPlayers = GetTrackedRealPlayerGuidsSnapshot(*this);
+    if (trackedPlayers.empty())
         return nullptr;
 
-    uint32 index = urand(0, players.size() - 1);
-    return players[index];
+    for (size_t attempts = trackedPlayers.size(); attempts > 0; --attempts)
+    {
+        uint32 index = urand(0, trackedPlayers.size() - 1);
+        if (Player* player = ObjectAccessor::FindConnectedPlayer(trackedPlayers[index]))
+        {
+            if (player->GetSession() && !player->IsDuringRemoveFromWorld() && !player->GetSession()->isLogingOut())
+                return player;
+        }
+    }
+
+    return nullptr;
 }
 
 void RandomPlayerbotMgr::PrintStats()
