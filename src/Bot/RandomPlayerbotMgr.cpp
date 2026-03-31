@@ -3597,6 +3597,11 @@ void RandomPlayerbotMgr::RandomTeleportForRpg(Player* bot)
 void RandomPlayerbotMgr::Remove(Player* bot)
 {
     ObjectGuid owner = bot->GetGUID();
+    uint32 botId = owner.GetCounter();
+
+    // Remove from the in-memory random roster first so no automatic random-bot maintenance
+    // can touch the character again in the current session.
+    currentBots.remove(botId);
 
     PlayerbotsDatabasePreparedStatement* stmt =
         PlayerbotsDatabase.GetPreparedStatement(PLAYERBOTS_DEL_RANDOM_BOTS_BY_OWNER);
@@ -3604,7 +3609,6 @@ void RandomPlayerbotMgr::Remove(Player* bot)
     stmt->SetData(1, owner.GetCounter());
     PlayerbotsDatabase.Execute(stmt);
 
-    uint32 botId = owner.GetCounter();
     eventCache.erase(botId);
 
     // Drop any queued (batched) DB event writes for this bot to avoid re-inserting rows after removal.

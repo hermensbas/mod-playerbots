@@ -5,6 +5,7 @@
 
 #include "HireAction.h"
 
+#include "CharacterCache.h"
 #include "Event.h"
 #include "RandomPlayerbotMgr.h"
 #include "PlayerbotAI.h"
@@ -58,6 +59,7 @@ bool HireAction::Execute(Event /*event*/)
     RandomPlayerbotMgr::instance().Remove(bot);
     CharacterDatabase.Execute("UPDATE characters SET account = {} WHERE guid = {}", account,
                               bot->GetGUID().GetCounter());
+    sCharacterCache->UpdateCharacterAccountId(bot->GetGUID(), account);
 
     return true;
 }
