@@ -5,6 +5,7 @@
 
 #include "LeaveGroupAction.h"
 
+#include "ByteBuffer.h"
 #include "Event.h"
 #include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
@@ -20,12 +21,23 @@ bool LeaveGroupAction::Execute(Event event)
 
 bool PartyCommandAction::Execute(Event event)
 {
-    WorldPacket& p = event.getPacket();
+    WorldPacket p(event.getPacket());
+    uint32 const minPacketSize = sizeof(uint32) + 1;
+    if (p.size() < minPacketSize)
+        return false;
+
     p.rpos(0);
     uint32 operation;
     std::string member;
 
-    p >> operation >> member;
+    try
+    {
+        p >> operation >> member;
+    }
+    catch (ByteBufferException const&)
+    {
+        return false;
+    }
 
     if (operation != PARTY_OP_LEAVE)
         return false;

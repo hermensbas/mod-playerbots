@@ -1469,13 +1469,118 @@ void PlayerbotAI::RequestDeferredTeleport(uint32 mapId, float x, float y, float 
     deferredWorldThreadOps_.fetch_or(DEFERRED_OP_TELEPORT, std::memory_order_release);
 }
 
+bool PlayerbotAI::HasPendingDeferredTeleport() const
+{
+    return (deferredWorldThreadOps_.load(std::memory_order_acquire) & DEFERRED_OP_TELEPORT) != 0;
+}
+
+void PlayerbotAI::ProcessPendingDeferredTeleport()
+{
+    if (!HasPendingDeferredTeleport())
+        return;
+
+    if (!bot || !bot->GetSession() || bot->IsDuringRemoveFromWorld() || bot->IsBeingTeleported())
+        return;
+
+    uint32 pendingOps = deferredWorldThreadOps_.fetch_and(~uint32(DEFERRED_OP_TELEPORT), std::memory_order_acq_rel);
+    if ((pendingOps & DEFERRED_OP_TELEPORT) == 0)
+        return;
+
+    uint32 const mapId = deferredTeleportMapId_.load(std::memory_order_relaxed);
+    float const x = deferredTeleportX_.load(std::memory_order_relaxed);
+    float const y = deferredTeleportY_.load(std::memory_order_relaxed);
+    float const z = deferredTeleportZ_.load(std::memory_order_relaxed);
+    float const orientation = deferredTeleportO_.load(std::memory_order_relaxed);
+    bool const updateHomebind = deferredTeleportUpdateHomebind_.load(std::memory_order_relaxed);
+    uint32 const homebindZoneId = deferredTeleportHomebindZoneId_.load(std::memory_order_relaxed);
+
+    if (updateHomebind)
+    {
+        WorldLocation homebindLocation(mapId, x, y, z, orientation);
+        bot->SetHomebind(homebindLocation, homebindZoneId);
+    }
+
+    bot->GetMotionMaster()->Clear();
+    Reset(true);
+    bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
+
+    if (bot->TeleportTo(mapId, x, y, z, orientation))
+        bot->SendMovementFlagUpdate();
+}
+
+void PlayerbotAI::RequestSafeSummonTeleport(uint32 mapId, float x, float y, float z, float orientation, bool preserveAuras)
+{
+    pendingSafeSummonTeleportMapId_.store(mapId, std::memory_order_relaxed);
+    pendingSafeSummonTeleportX_.store(x, std::memory_order_relaxed);
+    pendingSafeSummonTeleportY_.store(y, std::memory_order_relaxed);
+    pendingSafeSummonTeleportZ_.store(z, std::memory_order_relaxed);
+    pendingSafeSummonTeleportO_.store(orientation, std::memory_order_relaxed);
+    pendingSafeSummonPreserveAuras_.store(preserveAuras, std::memory_order_relaxed);
+    pendingSafeSummonTeleport_.store(true, std::memory_order_release);
+}
+
+bool PlayerbotAI::HasPendingSafeSummonTeleport() const
+{
+    return pendingSafeSummonTeleport_.load(std::memory_order_acquire);
+}
+
+void PlayerbotAI::ProcessPendingSafeSummonTeleport()
+{
+    if (!pendingSafeSummonTeleport_.load(std::memory_order_acquire))
+        return;
+
+    if (!bot || !bot->GetSession() || bot->IsDuringRemoveFromWorld() || bot->IsBeingTeleported())
+        return;
+
+    uint32 const mapId = pendingSafeSummonTeleportMapId_.load(std::memory_order_relaxed);
+    float const x = pendingSafeSummonTeleportX_.load(std::memory_order_relaxed);
+    float const y = pendingSafeSummonTeleportY_.load(std::memory_order_relaxed);
+    float const z = pendingSafeSummonTeleportZ_.load(std::memory_order_relaxed);
+    float const orientation = pendingSafeSummonTeleportO_.load(std::memory_order_relaxed);
+    bool const preserveAuras = pendingSafeSummonPreserveAuras_.load(std::memory_order_relaxed);
+
+    pendingSafeSummonTeleport_.store(false, std::memory_order_release);
+
+    bot->GetMotionMaster()->Clear();
+    aiObjectContext->GetValue<LastMovement&>("last movement")->Get().clear();
+
+    if (!preserveAuras)
+    {
+        bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED |
+                                           AURA_INTERRUPT_FLAG_CHANGE_MAP);
+    }
+
+    if (!bot->TeleportTo(mapId, x, y, z, orientation))
+        return;
+
+    if (Pet* pet = bot->GetPet())
+        pet->NearTeleportTo(x, y, z, bot->GetOrientation());
+
+    if (Guardian* guardianPet = bot->GetGuardianPet())
+        guardianPet->NearTeleportTo(x, y, z, bot->GetOrientation());
+
+    if (HasStrategy("stay", GetState()))
+    {
+        PositionMap& posMap = aiObjectContext->GetValue<PositionMap&>("position")->Get();
+        PositionInfo stayPosition = posMap["stay"];
+
+        stayPosition.Set(x, y, z, mapId);
+        posMap["stay"] = stayPosition;
+    }
+}
+
 void PlayerbotAI::ProcessDeferredWorldThreadOps()
 {
     uint32 pendingOps = deferredWorldThreadOps_.load(std::memory_order_acquire);
     if (pendingOps == DEFERRED_OP_NONE)
         return;
 
-    pendingOps = deferredWorldThreadOps_.exchange(DEFERRED_OP_NONE, std::memory_order_acq_rel);
+    uint32 const aiThreadOpsMask = ~uint32(DEFERRED_OP_TELEPORT);
+    if ((pendingOps & aiThreadOpsMask) == 0)
+        return;
+
+    pendingOps = deferredWorldThreadOps_.fetch_and(uint32(DEFERRED_OP_TELEPORT), std::memory_order_acq_rel);
+    pendingOps &= aiThreadOpsMask;
     if (pendingOps == DEFERRED_OP_NONE)
         return;
 
@@ -1491,28 +1596,6 @@ void PlayerbotAI::ProcessDeferredWorldThreadOps()
         DoSpecificAction("bg join", Event(), true);
     }
 
-    if (pendingOps & DEFERRED_OP_TELEPORT)
-    {
-        uint32 const mapId = deferredTeleportMapId_.load(std::memory_order_relaxed);
-        float const x = deferredTeleportX_.load(std::memory_order_relaxed);
-        float const y = deferredTeleportY_.load(std::memory_order_relaxed);
-        float const z = deferredTeleportZ_.load(std::memory_order_relaxed);
-        float const orientation = deferredTeleportO_.load(std::memory_order_relaxed);
-        bool const updateHomebind = deferredTeleportUpdateHomebind_.load(std::memory_order_relaxed);
-        uint32 const homebindZoneId = deferredTeleportHomebindZoneId_.load(std::memory_order_relaxed);
-
-        if (updateHomebind)
-        {
-            WorldLocation homebindLocation(mapId, x, y, z, orientation);
-            bot->SetHomebind(homebindLocation, homebindZoneId);
-        }
-
-        bot->GetMotionMaster()->Clear();
-        Reset(true);
-        bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
-        bot->TeleportTo(mapId, x, y, z, orientation);
-        bot->SendMovementFlagUpdate();
-    }
 }
 
 void PlayerbotAI::HandleCommands()

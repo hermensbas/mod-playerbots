@@ -689,6 +689,24 @@ void PlayerbotHolder::UpdateSessions()
             continue;
         }
 
+        if (botAI->HasPendingDeferredTeleport())
+        {
+            if (bot->IsBeingTeleported())
+                botAI->HandleTeleportAck();
+            else
+                botAI->ProcessPendingDeferredTeleport();
+            continue;
+        }
+
+        if (botAI->HasPendingSafeSummonTeleport())
+        {
+            if (bot->IsBeingTeleported())
+                botAI->HandleTeleportAck();
+            else
+                botAI->ProcessPendingSafeSummonTeleport();
+            continue;
+        }
+
         if (bot->IsBeingTeleported())
         {
             botAI->HandleTeleportAck();

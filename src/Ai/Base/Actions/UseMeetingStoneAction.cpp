@@ -225,6 +225,15 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
                     botAI->GetAiObjectContext()->GetValue<GuidVector>("prioritized targets")->Reset();
                 }
 
+                // Teleporting a bot directly from the action stack runs inside Player::Update /
+                // OnPlayerAfterUpdate and can invalidate visibility teardown state mid-update.
+                // Queue the actual teleport for the normal bot session update flow instead.
+                if (player == bot)
+                {
+                    botAI->RequestSafeSummonTeleport(mapId, x, y, z, 0.0f, preserveAuras);
+                    return true;
+                }
+
                 player->GetMotionMaster()->Clear();
                 AI_VALUE(LastMovement&, "last movement").clear();
 

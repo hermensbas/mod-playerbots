@@ -16,6 +16,15 @@
 
 using namespace SerpentShrineCavernHelpers;
 
+namespace
+{
+    bool IsUsableCoreHandler(Player* player)
+    {
+        return player && player->IsAlive() && player->IsInWorld() &&
+               !player->IsDuringRemoveFromWorld();
+    }
+}
+
 // General
 
 bool SerpentShrineCavernEraseTimersAndTrackersAction::Execute(Event /*event*/)
@@ -2119,6 +2128,9 @@ bool LadyVashjPassTheTaintedCoreAction::Execute(Event /*event*/)
     Player* thirdCorePasser = GetThirdTaintedCorePasser(botAI, bot);
     Player* fourthCorePasser = GetFourthTaintedCorePasser(botAI, bot);
 
+    if (!IsUsableCoreHandler(designatedLooter) || !IsUsableCoreHandler(firstCorePasser))
+        return false;
+
     const uint32 instanceId = vashj->GetMap()->GetInstanceId();
 
     Unit* closestTrigger = nullptr;
@@ -2155,17 +2167,19 @@ bool LadyVashjPassTheTaintedCoreAction::Execute(Event /*event*/)
         {
             return true;
         }
-        else if (bot == secondCorePasser &&
+        else if (bot == secondCorePasser && IsUsableCoreHandler(secondCorePasser) &&
                  LineUpSecondCorePasser(firstCorePasser, closestTrigger))
         {
             return true;
         }
-        else if (bot == thirdCorePasser && LineUpThirdCorePasser(
+        else if (bot == thirdCorePasser && IsUsableCoreHandler(thirdCorePasser) &&
+                 LineUpThirdCorePasser(
                  designatedLooter, firstCorePasser, secondCorePasser, closestTrigger))
         {
             return true;
         }
-        else if (bot == fourthCorePasser && LineUpFourthCorePasser(
+        else if (bot == fourthCorePasser && IsUsableCoreHandler(fourthCorePasser) &&
+                 LineUpFourthCorePasser(
                  firstCorePasser, secondCorePasser, thirdCorePasser, closestTrigger))
         {
             return true;
@@ -2192,6 +2206,7 @@ bool LadyVashjPassTheTaintedCoreAction::Execute(Event /*event*/)
         // First core passer: receive core from looter at the top of the stairs,
         // pass to second core passer
         else if (bot == firstCorePasser &&
+                 IsUsableCoreHandler(secondCorePasser) &&
                  IsSecondCorePasserInPosition(firstCorePasser, secondCorePasser, closestTrigger))
         {
             const time_t now = std::time(nullptr);
@@ -2208,7 +2223,8 @@ bool LadyVashjPassTheTaintedCoreAction::Execute(Event /*event*/)
         // Second core passer: if closest usable generator is within passing distance
         // of the first passer, move to the generator; otherwise, move as close as
         // possible to the generator while staying in passing range
-        else if (bot == secondCorePasser && !UseCoreOnNearestGenerator(instanceId) &&
+        else if (bot == secondCorePasser && IsUsableCoreHandler(thirdCorePasser) &&
+                 !UseCoreOnNearestGenerator(instanceId) &&
                  IsThirdCorePasserInPosition(secondCorePasser, thirdCorePasser, closestTrigger))
         {
             const time_t now = std::time(nullptr);
@@ -2225,7 +2241,8 @@ bool LadyVashjPassTheTaintedCoreAction::Execute(Event /*event*/)
         // Third core passer: if closest usable generator is within passing distance
         // of the second passer, move to the generator; otherwise, move as close as
         // possible to the generator while staying in passing range
-        else if (bot == thirdCorePasser && !UseCoreOnNearestGenerator(instanceId) &&
+        else if (bot == thirdCorePasser && IsUsableCoreHandler(fourthCorePasser) &&
+                 !UseCoreOnNearestGenerator(instanceId) &&
                  IsFourthCorePasserInPosition(thirdCorePasser, fourthCorePasser, closestTrigger))
         {
             const time_t now = std::time(nullptr);
@@ -2251,6 +2268,9 @@ bool LadyVashjPassTheTaintedCoreAction::Execute(Event /*event*/)
 bool LadyVashjPassTheTaintedCoreAction::LineUpFirstCorePasser(
     Player* designatedLooter, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(designatedLooter) || !closestTrigger)
+        return false;
+
     const float centerX = VASHJ_PLATFORM_CENTER_POSITION.GetPositionX();
     const float centerY = VASHJ_PLATFORM_CENTER_POSITION.GetPositionY();
     constexpr float radius = 57.5f;
@@ -2284,6 +2304,9 @@ bool LadyVashjPassTheTaintedCoreAction::LineUpFirstCorePasser(
 bool LadyVashjPassTheTaintedCoreAction::LineUpSecondCorePasser(
     Player* firstCorePasser, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(firstCorePasser) || !closestTrigger)
+        return false;
+
     auto itFirst = intendedLineup.find(firstCorePasser->GetGUID());
     if (itFirst == intendedLineup.end())
         return false;
@@ -2342,6 +2365,10 @@ bool LadyVashjPassTheTaintedCoreAction::LineUpThirdCorePasser(
     Player* designatedLooter, Player* firstCorePasser,
     Player* secondCorePasser, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(designatedLooter) || !IsUsableCoreHandler(firstCorePasser) ||
+        !IsUsableCoreHandler(secondCorePasser) || !closestTrigger)
+        return false;
+
     bool needThirdPasser =
         (IsFirstCorePasserInPosition(designatedLooter, firstCorePasser, closestTrigger) &&
          firstCorePasser->GetExactDist2d(closestTrigger) > 42.0f) ||
@@ -2407,6 +2434,10 @@ bool LadyVashjPassTheTaintedCoreAction::LineUpFourthCorePasser(
     Player* firstCorePasser, Player* secondCorePasser,
     Player* thirdCorePasser, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(firstCorePasser) || !IsUsableCoreHandler(secondCorePasser) ||
+        !IsUsableCoreHandler(thirdCorePasser) || !closestTrigger)
+        return false;
+
     bool needFourthPasser =
         (IsSecondCorePasserInPosition(firstCorePasser, secondCorePasser, closestTrigger) &&
          secondCorePasser->GetExactDist2d(closestTrigger) > 42.0f) ||
@@ -2463,6 +2494,9 @@ bool LadyVashjPassTheTaintedCoreAction::LineUpFourthCorePasser(
 bool LadyVashjPassTheTaintedCoreAction::IsFirstCorePasserInPosition(
     Player* designatedLooter, Player* firstCorePasser, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(firstCorePasser) || !closestTrigger)
+        return false;
+
     auto itSnap = intendedLineup.find(firstCorePasser->GetGUID());
     if (itSnap != intendedLineup.end())
     {
@@ -2477,6 +2511,9 @@ bool LadyVashjPassTheTaintedCoreAction::IsFirstCorePasserInPosition(
 bool LadyVashjPassTheTaintedCoreAction::IsSecondCorePasserInPosition(
     Player* firstCorePasser, Player* secondCorePasser, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(secondCorePasser) || !closestTrigger)
+        return false;
+
     auto itSnap = intendedLineup.find(secondCorePasser->GetGUID());
     if (itSnap != intendedLineup.end())
     {
@@ -2491,6 +2528,9 @@ bool LadyVashjPassTheTaintedCoreAction::IsSecondCorePasserInPosition(
 bool LadyVashjPassTheTaintedCoreAction::IsThirdCorePasserInPosition(
     Player* secondCorePasser, Player* thirdCorePasser, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(thirdCorePasser) || !closestTrigger)
+        return false;
+
     auto itSnap = intendedLineup.find(thirdCorePasser->GetGUID());
     if (itSnap != intendedLineup.end())
     {
@@ -2505,6 +2545,9 @@ bool LadyVashjPassTheTaintedCoreAction::IsThirdCorePasserInPosition(
 bool LadyVashjPassTheTaintedCoreAction::IsFourthCorePasserInPosition(
     Player* thirdCorePasser, Player* fourthCorePasser, Unit* closestTrigger)
 {
+    if (!IsUsableCoreHandler(fourthCorePasser) || !closestTrigger)
+        return false;
+
     auto itSnap = intendedLineup.find(fourthCorePasser->GetGUID());
     if (itSnap != intendedLineup.end())
     {

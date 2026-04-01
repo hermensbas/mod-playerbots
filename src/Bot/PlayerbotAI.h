@@ -465,6 +465,11 @@ public:
     void RequestDeferredBgJoin(uint32 queueTypeId, uint32 arenaType = 1);
     void RequestDeferredTeleport(uint32 mapId, float x, float y, float z, float orientation, bool updateHomebind = false,
                                  uint32 homebindZoneId = 0);
+    bool HasPendingDeferredTeleport() const;
+    void ProcessPendingDeferredTeleport();
+    void RequestSafeSummonTeleport(uint32 mapId, float x, float y, float z, float orientation, bool preserveAuras);
+    bool HasPendingSafeSummonTeleport() const;
+    void ProcessPendingSafeSummonTeleport();
     void ChangeEngine(BotState type);
     void ChangeEngineOnCombat();
     void ChangeEngineOnNonCombat();
@@ -789,6 +794,13 @@ protected:
     std::atomic<float> deferredTeleportO_{0.0f};
     std::atomic<uint32> deferredTeleportHomebindZoneId_{0};
     std::atomic<bool> deferredTeleportUpdateHomebind_{false};
+    std::atomic<bool> pendingSafeSummonTeleport_{false};
+    std::atomic<uint32> pendingSafeSummonTeleportMapId_{0};
+    std::atomic<float> pendingSafeSummonTeleportX_{0.0f};
+    std::atomic<float> pendingSafeSummonTeleportY_{0.0f};
+    std::atomic<float> pendingSafeSummonTeleportZ_{0.0f};
+    std::atomic<float> pendingSafeSummonTeleportO_{0.0f};
+    std::atomic<bool> pendingSafeSummonPreserveAuras_{true};
     bool inCombat = false;
     BotCheatMask cheatMask = BotCheatMask::none;
     Position jumpDestination = Position();
