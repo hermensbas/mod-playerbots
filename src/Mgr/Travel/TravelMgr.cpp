@@ -14,8 +14,8 @@
 #include "TravelNode.h"
 #include "Talentspec.h"
 #include "ChatHelper.h"
+#include "MMapFactory.h"
 #include "MapMgr.h"
-#include "MMapMgr.h"
 #include "PathGenerator.h"
 #include "Playerbots.h"
 #include "RaceMgr.h"
@@ -693,8 +693,7 @@ void WorldPosition::loadMapAndVMap(uint32 mapId, uint8 x, uint8 y)
 
     if (isOverworld() && false || false)
     {
-        Map* map = sMapMgr->CreateBaseMap(mapId);
-        if (!map || map->GetMapCollisionData().LoadMMapTile(x, y) == MMAP::MMAP_LOAD_RESULT_ERROR)
+        if (!MMAP::MMapFactory::createOrGetMMapMgr()->loadMap(mapId, x, y))
             if (sPlayerbotAIConfig.hasLog(fileName))
             {
                 std::ostringstream out;
@@ -713,8 +712,11 @@ void WorldPosition::loadMapAndVMap(uint32 mapId, uint8 x, uint8 y)
             if (!TravelMgr::instance().isBadVmap(mapId, x, y))
             {
                 // load VMAPs for current map/grid...
-                Map* map = sMapMgr->CreateBaseMap(mapId);
-                int vmapLoadResult = map ? map->GetMapCollisionData().LoadVMapTile(x, y) : VMAP::VMAP_LOAD_RESULT_ERROR;
+                const MapEntry* i_mapEntry = sMapStore.LookupEntry(mapId);
+                //const char* mapName = i_mapEntry ? i_mapEntry->name[sWorld->GetDefaultDbcLocale()] : "UNNAMEDMAP\x0"; //not used, (usage are commented out below), line marked for removal.
+
+                int vmapLoadResult = VMAP::VMapFactory::createOrGetVMapMgr()->loadMap(
+                    (sWorld->GetDataPath() + "vmaps").c_str(), mapId, x, y);
                 switch (vmapLoadResult)
                 {
                     case VMAP::VMAP_LOAD_RESULT_OK:
@@ -747,8 +749,7 @@ void WorldPosition::loadMapAndVMap(uint32 mapId, uint8 x, uint8 y)
         if (!TravelMgr::instance().isBadMmap(mapId, x, y))
         {
             // load navmesh
-            Map* map = sMapMgr->CreateBaseMap(mapId);
-            if (!map || map->GetMapCollisionData().LoadMMapTile(x, y) == MMAP::MMAP_LOAD_RESULT_ERROR)
+            if (!MMAP::MMapFactory::createOrGetMMapMgr()->loadMap(mapId, x, y))
                 TravelMgr::instance().addBadMmap(mapId, x, y);
 
             if (sPlayerbotAIConfig.hasLog(fileName))

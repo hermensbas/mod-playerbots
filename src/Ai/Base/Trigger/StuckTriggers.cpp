@@ -6,10 +6,9 @@
 #include "StuckTriggers.h"
 
 #include "CellImpl.h"
-#include "Map.h"
-#include "MMapMgr.h"
 #include "PathGenerator.h"
 #include "Playerbots.h"
+#include "MMapFactory.h"
 
 bool MoveStuckTrigger::IsActive()
 {
@@ -91,7 +90,7 @@ bool MoveLongStuckTrigger::IsActive()
     }
 
     if (cell.GridX() > 0 && cell.GridY() > 0 &&
-        bot->GetMap()->GetMapCollisionData().LoadMMapTile(cell.GridX(), cell.GridY()) == MMAP::MMAP_LOAD_RESULT_ERROR)
+        !MMAP::MMapFactory::createOrGetMMapMgr()->loadMap(botPos.GetMapId(), cell.GridX(), cell.GridY()))
     {
         // LOG_INFO("playerbots", "Bot {} {}:{} <{}> was in unloaded grid {},{} on map {}",
         // bot->GetGUID().ToString().c_str(), bot->GetTeamId() == TEAM_ALLIANCE ? "A" : "H", bot->GetLevel(),
