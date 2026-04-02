@@ -126,11 +126,13 @@ bool RpgEmoteAction::isUseful() { return rpg->InRange() && !botAI->HasRealPlayer
 
 bool RpgEmoteAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     uint32 type = TalkAction::GetRandomEmote(rpg->guidP().GetUnit());
 
     WorldPacket p1;
     p1 << rpg->guid();
-    bot->GetSession()->HandleGossipHelloOpcode(p1);
+    session->HandleGossipHelloOpcode(p1);
 
     bot->HandleEmoteCommand(type);
 
@@ -150,10 +152,12 @@ bool RpgTaxiAction::isUseful() { return rpg->InRange() && !botAI->HasRealPlayerM
 
 bool RpgTaxiAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     GuidPosition guidP = rpg->guidP();
 
     WorldPacket emptyPacket;
-    bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+    session->HandleCancelMountAuraOpcode(emptyPacket);
 
     uint32 node =
         sObjectMgr->GetNearestTaxiNode(guidP.GetPositionX(), guidP.GetPositionY(), guidP.GetPositionZ(), guidP.GetMapId(), bot->GetTeamId());
@@ -211,6 +215,8 @@ bool RpgTaxiAction::Execute(Event /*event*/)
 
 bool RpgDiscoverAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     GuidPosition guidP = rpg->guidP();
 
     uint32 node =
@@ -223,7 +229,7 @@ bool RpgDiscoverAction::Execute(Event /*event*/)
     if (!flightMaster)
         return false;
 
-    return bot->GetSession()->SendLearnNewTaxiNode(flightMaster);
+    return session->SendLearnNewTaxiNode(flightMaster);
 }
 
 std::string const RpgStartQuestAction::ActionName() { return "accept all quests"; }

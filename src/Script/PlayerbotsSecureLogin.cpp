@@ -2,17 +2,18 @@
 #include "Opcodes.h"
 #include "Player.h"
 #include "ObjectAccessor.h"
+#include "WorldSession.h"
 
 #include "Playerbots.h"
 
 namespace
 {
-    static Player* FindOnlineAltbotByGuid(ObjectGuid guid)
+    static Player* FindConnectedAltbotByGuid(ObjectGuid guid)
     {
         if (!guid)
             return nullptr;
 
-        Player* p = ObjectAccessor::FindPlayer(guid);
+        Player* p = ObjectAccessor::FindConnectedPlayer(guid);
         if (!p)
             return nullptr;
 
@@ -28,21 +29,7 @@ namespace
         if (!target)
             return;
 
-        PlayerbotAI* ai = GET_PLAYERBOT_AI(target);
-
-        if (!ai)
-            return;
-
-        if (Player* master = ai->GetMaster())
-        {
-            if (PlayerbotMgr* mgr = GET_PLAYERBOT_MGR(master))
-            {
-                mgr->LogoutPlayerBot(target->GetGUID());
-                return;
-            }
-        }
-
-        sRandomPlayerbotMgr.LogoutPlayerBot(target->GetGUID());
+        PlayerbotHolder::RequestSafeBotLogout(target->GetGUID());
     }
 }
 
@@ -52,7 +39,7 @@ public:
     PlayerbotsSecureLoginServerScript()
         : ServerScript("PlayerbotsSecureLoginServerScript", { SERVERHOOK_CAN_PACKET_RECEIVE }) {}
 
-    bool CanPacketReceive(WorldSession* /*session*/, WorldPacket const& packet) override
+    bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
     {
         if (packet.GetOpcode() != CMSG_PLAYER_LOGIN)
             return true;
@@ -64,11 +51,25 @@ public:
         if (!loginGuid)
             return true;
 
-        Player* existingAltbot = FindOnlineAltbotByGuid(loginGuid);
-        if (existingAltbot)
-            ForceLogoutViaPlayerbotHolder(existingAltbot);
+        Player* existingAltbot = FindConnectedAltbotByGuid(loginGuid);
+        if (!existingAltbot)
+            return true;
 
-        return true;
+        ForceLogoutViaPlayerbotHolder(existingAltbot);
+
+        // Bot logout is deferred until the next safe playerbot session update, so the character
+        // is still connected right now. Reject this login attempt and let the client retry after
+        // the bot instance is fully removed; otherwise we can transiently create two live Player
+        // objects with the same GUID and corrupt shared state.
+        if (session)
+        {
+            LOG_WARN("playerbots",
+                     "Rejected login for {} because an altbot instance of the same character is still connected; bot logout was requested and the client must retry.",
+                     loginGuid.ToString());
+            session->SendCharLoginFailed(LoginFailureReason::DuplicateCharacter);
+        }
+
+        return false;
     }
 };
 

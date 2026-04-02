@@ -10,6 +10,13 @@
 
 bool SetHomeAction::Execute(Event /*event*/)
 {
+    if (!bot)
+        return false;
+
+    WorldSession* session = bot->GetSession();
+    if (!session)
+        return false;
+
     Player* master = GetMaster();
 
     ObjectGuid selection = bot->GetTarget();
@@ -27,7 +34,10 @@ bool SetHomeAction::Execute(Event /*event*/)
         if (unit->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER))
         {
             Creature* creature = botAI->GetCreature(selection);
-            bot->GetSession()->SendBindPoint(creature);
+            if (!creature)
+                return false;
+
+            session->SendBindPoint(creature);
             botAI->TellMaster("This inn is my new home");
             return true;
         }
@@ -39,7 +49,7 @@ bool SetHomeAction::Execute(Event /*event*/)
         if (!unit)
             continue;
 
-        bot->GetSession()->SendBindPoint(unit);
+        session->SendBindPoint(unit);
         botAI->TellMaster("This inn is my new home");
         return true;
     }

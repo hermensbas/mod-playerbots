@@ -99,11 +99,12 @@ bool TeleportAction::Execute(Event /*event*/)
     LastMovement& movement = context->GetValue<LastMovement&>("last area trigger")->Get();
     if (movement.lastAreaTrigger)
     {
+        WorldSession* session = GetBotSession();
         WorldPacket p(CMSG_AREATRIGGER);
         p << movement.lastAreaTrigger;
         p.rpos(0);
 
-        bot->GetSession()->HandleAreaTriggerOpcode(p);
+        session->HandleAreaTriggerOpcode(p);
         movement.lastAreaTrigger = 0;
         return true;
     }

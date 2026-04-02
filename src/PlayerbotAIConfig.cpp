@@ -4,6 +4,9 @@
  */
 
 #include "PlayerbotAIConfig.h"
+
+#include <cstdarg>
+#include <cstdio>
 #include <iostream>
 #include "Config.h"
 #include "NewRpgInfo.h"
@@ -16,6 +19,43 @@
 #include "RandomPlayerbotMgr.h"
 #include "Talentspec.h"
 #include "TravelMgr.h"
+
+namespace
+{
+bool OpenLogUnlocked(PlayerbotAIConfig& config, std::string const& fileName, char const* mode)
+{
+    if (!config.hasLog(fileName))
+        return false;
+
+    auto logFileIt = config.logFiles.find(fileName);
+    if (logFileIt == config.logFiles.end())
+    {
+        config.logFiles.insert(std::make_pair(fileName, std::make_pair(nullptr, false)));
+        logFileIt = config.logFiles.find(fileName);
+    }
+
+    FILE* file = logFileIt->second.first;
+    bool fileOpen = logFileIt->second.second;
+
+    if (fileOpen)
+        fclose(file);
+
+    std::string logsDir = sConfigMgr->GetOption<std::string>("LogsDir", "", false);
+    if (!logsDir.empty())
+    {
+        if ((logsDir.at(logsDir.length() - 1) != '/') && (logsDir.at(logsDir.length() - 1) != '\\'))
+            logsDir.append("/");
+    }
+
+    file = fopen((logsDir + fileName).c_str(), mode);
+    fileOpen = true;
+
+    logFileIt->second.first = file;
+    logFileIt->second.second = fileOpen;
+
+    return true;
+}
+}
 
 template <class T>
 void LoadList(std::string const value, T& list)
@@ -193,7 +233,15 @@ bool PlayerbotAIConfig::Initialize()
     minRandomBots = sConfigMgr->GetOption<int32>("AiPlayerbot.MinRandomBots", 500);
     maxRandomBots = sConfigMgr->GetOption<int32>("AiPlayerbot.MaxRandomBots", 500);
     randomBotUpdateInterval = sConfigMgr->GetOption<int32>("AiPlayerbot.RandomBotUpdateInterval", 20);
-    randomBotCountChangeMinInterval =
+    randomBotSlicing = sConfigMgr->GetOption<bool>("AiPlayerbot.RandomBotSlicing", false);
+
+int32 sliceMs = sConfigMgr->GetOption<int32>("AiPlayerbot.RandomBotSliceMs", 250);
+if (sliceMs < 50)
+    sliceMs = 50;
+if (sliceMs > 5000)
+    sliceMs = 5000;
+randomBotSliceMs = static_cast<uint32>(sliceMs);
+randomBotCountChangeMinInterval =
         sConfigMgr->GetOption<int32>("AiPlayerbot.RandomBotCountChangeMinInterval", 30 * MINUTE);
     randomBotCountChangeMaxInterval =
         sConfigMgr->GetOption<int32>("AiPlayerbot.RandomBotCountChangeMaxInterval", 2 * HOUR);
@@ -411,6 +459,11 @@ bool PlayerbotAIConfig::Initialize()
 
     commandPrefix = sConfigMgr->GetOption<std::string>("AiPlayerbot.CommandPrefix", "");
     commandSeparator = sConfigMgr->GetOption<std::string>("AiPlayerbot.CommandSeparator", "\\\\");
+    if (commandSeparator.empty())
+    {
+        LOG_ERROR("playerbots", "AiPlayerbot.CommandSeparator must not be empty. Falling back to \"\\\\\" to avoid recursive command parsing and stack overflow.");
+        commandSeparator = "\\\\";
+    }
 
     commandServerPort = sConfigMgr->GetOption<int32>("AiPlayerbot.CommandServerPort", 8888);
     perfMonEnabled = sConfigMgr->GetOption<bool>("AiPlayerbot.PerfMonEnabled", false);
@@ -753,36 +806,8 @@ std::string const PlayerbotAIConfig::GetTimestampStr()
 
 bool PlayerbotAIConfig::openLog(std::string const fileName, char const* mode)
 {
-    if (!hasLog(fileName))
-        return false;
-
-    auto logFileIt = logFiles.find(fileName);
-    if (logFileIt == logFiles.end())
-    {
-        logFiles.insert(std::make_pair(fileName, std::make_pair(nullptr, false)));
-        logFileIt = logFiles.find(fileName);
-    }
-
-    FILE* file = logFileIt->second.first;
-    bool fileOpen = logFileIt->second.second;
-
-    if (fileOpen)  // close log file
-        fclose(file);
-
-    std::string m_logsDir = sConfigMgr->GetOption<std::string>("LogsDir", "", false);
-    if (!m_logsDir.empty())
-    {
-        if ((m_logsDir.at(m_logsDir.length() - 1) != '/') && (m_logsDir.at(m_logsDir.length() - 1) != '\\'))
-            m_logsDir.append("/");
-    }
-
-    file = fopen((m_logsDir + fileName).c_str(), mode);
-    fileOpen = true;
-
-    logFileIt->second.first = file;
-    logFileIt->second.second = fileOpen;
-
-    return true;
+    std::lock_guard<std::mutex> guard(m_logMtx);
+    return OpenLogUnlocked(*this, fileName, mode);
 }
 
 void PlayerbotAIConfig::log(std::string const fileName, char const* str, ...)
@@ -790,21 +815,37 @@ void PlayerbotAIConfig::log(std::string const fileName, char const* str, ...)
     if (!str)
         return;
 
+    va_list ap;
+    va_start(ap, str);
+    va_list apCopy;
+    va_copy(apCopy, ap);
+    int formattedLength = std::vsnprintf(nullptr, 0, str, apCopy);
+    va_end(apCopy);
+
+    if (formattedLength < 0)
+    {
+        va_end(ap);
+        return;
+    }
+
+    std::vector<char> formatted(static_cast<size_t>(formattedLength) + 1u);
+    std::vsnprintf(formatted.data(), formatted.size(), str, ap);
+    va_end(ap);
+
     std::lock_guard<std::mutex> guard(m_logMtx);
 
-    if (!isLogOpen(fileName) && !openLog(fileName, "a"))
+    auto logFileIt = logFiles.find(fileName);
+    bool fileOpen = logFileIt != logFiles.end() && logFileIt->second.second;
+    if (!fileOpen && !OpenLogUnlocked(*this, fileName, "a"))
         return;
 
     FILE* file = logFiles.find(fileName)->second.first;
+    if (!file)
+        return;
 
-    va_list ap;
-    va_start(ap, str);
-    vfprintf(file, str, ap);
-    fprintf(file, "\n");
-    va_end(ap);
+    fwrite(formatted.data(), 1, static_cast<size_t>(formattedLength), file);
+    fputc('\n', file);
     fflush(file);
-
-    fflush(stdout);
 }
 
 void PlayerbotAIConfig::loadWorldBuff()

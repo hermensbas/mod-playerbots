@@ -14,6 +14,11 @@
 #include "Playerbots.h"
 #include "PositionValue.h"
 
+namespace
+{
+constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
+}
+
 bool UseMeetingStoneAction::Execute(Event event)
 {
     Player* master = GetMaster();
@@ -151,6 +156,23 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
     if (!summoner || summoner == player)
         return false;
 
+    // Do not allow teleport/summon inside battlegrounds or arenas.
+    // This prevents using the "summon" command (and any other SummonAction-based teleports)
+    // to move bots around in PvP instances.
+    if (summoner->InBattleground() || summoner->InArena())
+    {
+        botAI->TellError("You cannot summon me in battlegrounds or arenas");
+        return false;
+    }
+
+    // Wintergrasp is a battlefield zone, so it bypasses the regular battleground/arena checks above.
+    // Keep altbots allowed there, but block summon-based entry for player-controlled summon/random bots.
+    if (summoner->GetZoneId() == WINTERGRASP_ZONE_ID && !botAI->IsAlt())
+    {
+        botAI->TellError("You cannot summon non-alt bots in Wintergrasp");
+        return false;
+    }
+
     if (player->GetVehicle())
     {
         botAI->TellError("You cannot summon me while I'm on a vehicle");
@@ -201,6 +223,15 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
                     bot->SpawnCorpseBones();
                     botAI->TellMasterNoFacing("I live, again!");
                     botAI->GetAiObjectContext()->GetValue<GuidVector>("prioritized targets")->Reset();
+                }
+
+                // Teleporting a bot directly from the action stack runs inside Player::Update /
+                // OnPlayerAfterUpdate and can invalidate visibility teardown state mid-update.
+                // Queue the actual teleport for the normal bot session update flow instead.
+                if (player == bot)
+                {
+                    botAI->RequestSafeSummonTeleport(mapId, x, y, z, 0.0f, preserveAuras);
+                    return true;
                 }
 
                 player->GetMotionMaster()->Clear();

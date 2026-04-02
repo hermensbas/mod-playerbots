@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Common.h"
+#include "ObjectGuid.h"
 #include "TravelMgr.h"
 
 class Player;
@@ -44,7 +45,7 @@ public:
 
 private:
     void calculatePossibleDestinations(std::vector<FleePoint*>& points);
-    void calculateDistanceToCreatures(FleePoint* point);
+    void calculateDistanceToCreatures(FleePoint* point, GuidVector const& units);
     void cleanup(std::vector<FleePoint*>& points);
     FleePoint* selectOptimalDestination(std::vector<FleePoint*>& points);
     bool isBetterThan(FleePoint* point, FleePoint* other);

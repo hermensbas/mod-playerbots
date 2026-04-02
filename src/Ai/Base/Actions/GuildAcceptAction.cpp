@@ -12,6 +12,8 @@
 
 bool GuildAcceptAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     WorldPacket p(event.getPacket());
     p.rpos(0);
     Player* inviter = nullptr;
@@ -45,12 +47,12 @@ bool GuildAcceptAction::Execute(Event event)
     if (accept)
     {
         WorldPackets::Guild::AcceptGuildInvite data = WorldPacket(CMSG_GUILD_ACCEPT);
-        bot->GetSession()->HandleGuildAcceptOpcode(data);
+        session->HandleGuildAcceptOpcode(data);
     }
     else
     {
         WorldPackets::Guild::GuildDeclineInvitation data = WorldPacket(CMSG_GUILD_DECLINE);
-        bot->GetSession()->HandleGuildDeclineOpcode(data);
+        session->HandleGuildDeclineOpcode(data);
     }
 
     return true;

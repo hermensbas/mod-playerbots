@@ -10,12 +10,72 @@
 #include <boost/smart_ptr.hpp>
 #include <boost/thread/thread.hpp>
 #include <cstdlib>
+#include <future>
 #include "RandomPlayerbotMgr.h"
+#include "PlayerbotWorldThreadProcessor.h"
 
 #include "IoContext.h"
 
 using boost::asio::ip::tcp;
 typedef boost::shared_ptr<tcp::socket> socket_ptr;
+
+namespace
+{
+class RemoteCommandOperation final : public PlayerbotOperation
+{
+public:
+    RemoteCommandOperation(std::string request, std::shared_ptr<std::promise<std::string>> resultPromise)
+        : _request(std::move(request)), _resultPromise(std::move(resultPromise))
+    {
+    }
+
+    bool Execute() override
+    {
+        if (!_resultPromise)
+            return false;
+
+        try
+        {
+            _resultPromise->set_value(RandomPlayerbotMgr::instance().HandleRemoteCommand(_request));
+            return true;
+        }
+        catch (std::exception const& e)
+        {
+            _resultPromise->set_value(std::string("remote command failed: ") + e.what());
+            return false;
+        }
+        catch (...)
+        {
+            _resultPromise->set_value("remote command failed: unknown exception");
+            return false;
+        }
+    }
+
+    uint32 GetPriority() const override { return 20; }
+    std::string GetName() const override { return "RemoteCommand"; }
+
+private:
+    std::string _request;
+    std::shared_ptr<std::promise<std::string>> _resultPromise;
+};
+
+std::string DispatchRemoteCommand(std::string const& request)
+{
+    auto resultPromise = std::make_shared<std::promise<std::string>>();
+    std::future<std::string> resultFuture = resultPromise->get_future();
+
+    if (!PlayerbotWorldThreadProcessor::instance().QueueOperation(
+            std::make_unique<RemoteCommandOperation>(request, resultPromise)))
+    {
+        return "remote command queue is full";
+    }
+
+    if (resultFuture.wait_for(std::chrono::seconds(10)) != std::future_status::ready)
+        return "remote command timed out waiting for world thread";
+
+    return resultFuture.get();
+}
+}
 
 bool ReadLine(socket_ptr sock, std::string* buffer, std::string* line)
 {
@@ -47,7 +107,7 @@ void session(socket_ptr sock)
         std::string buffer, request;
         while (ReadLine(sock, &buffer, &request))
         {
-            std::string const response = RandomPlayerbotMgr::instance().HandleRemoteCommand(request) + "\n";
+            std::string const response = DispatchRemoteCommand(request) + "\n";
             boost::asio::write(*sock, boost::asio::buffer(response.c_str(), response.size()));
             request = "";
         }

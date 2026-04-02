@@ -28,6 +28,9 @@ public:
     bool IsAccountLinked(uint32 accountId, uint32 masterAccountId);
     void HandlePlayerBotLoginCallback(PlayerbotLoginQueryHolder const& holder);
 
+    static bool RequestSafeBotLogout(ObjectGuid guid);
+    static void ProcessPendingSafeLogouts();
+    static void LogoutAllBotsForShutdown();
     void LogoutPlayerBot(ObjectGuid guid);
     void DisablePlayerBot(ObjectGuid guid);
     void RemoveFromPlayerbotsMap(ObjectGuid guid);
@@ -52,6 +55,10 @@ public:
     std::string const LookupBots(Player* master);
     uint32 GetPlayerbotsCount() { return playerBots.size(); }
     uint32 GetPlayerbotsCountByClass(uint32 cls);
+
+    // Throttled init requests to prevent server stalls from init command spam.
+    // Call this from a world update hook (e.g. PlayerbotsScript::OnPlayerbotUpdate).
+    static void UpdateInitQueue(uint32 diff);
 
 protected:
     virtual void OnBotLoginInternal(Player* const bot) = 0;
@@ -108,7 +115,10 @@ public:
     void RemovePlayerBotData(ObjectGuid const& guid, bool is_AI);
 
     PlayerbotAI* GetPlayerbotAI(Player* player);
+    PlayerbotAI* GetPlayerbotAI(ObjectGuid const& guid);
     PlayerbotMgr* GetPlayerbotMgr(Player* player);
+    PlayerbotMgr* GetPlayerbotMgr(ObjectGuid const& guid);
+    void LogoutAllPlayerBots();
 
 private:
     PlayerbotsMgr() = default;

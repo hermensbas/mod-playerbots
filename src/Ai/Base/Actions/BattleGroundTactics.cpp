@@ -115,6 +115,12 @@ enum BattleBotWsgWaitSpot
 
 std::unordered_map<uint32, BGStrategyData> bgStrategies;
 
+namespace
+{
+uint32 constexpr RING_OF_VALOR_START_HOLD_MS = 20 * IN_MILLISECONDS;
+std::unordered_map<uint32, uint32> arenaStartHoldByInstance;
+}
+
 std::vector<uint32> const vFlagsAV = {
     BG_AV_OBJECTID_BANNER_H_B,      BG_AV_OBJECTID_BANNER_H,      BG_AV_OBJECTID_BANNER_A_B,
     BG_AV_OBJECTID_BANNER_A,        BG_AV_OBJECTID_BANNER_CONT_A, BG_AV_OBJECTID_BANNER_CONT_A_B,
@@ -4251,6 +4257,7 @@ bool ArenaTactics::Execute(Event /*event*/)
 {
     if (!bot->InBattleground())
     {
+        arenaStartHoldByInstance.erase(bot->GetBattlegroundId());
         bool IsRandomBot = sRandomPlayerbotMgr.IsRandomBot(bot->GetGUID().GetCounter());
         botAI->ChangeStrategy("-arena", BOT_STATE_COMBAT);
         botAI->ChangeStrategy("-arena", BOT_STATE_NON_COMBAT);
@@ -4262,17 +4269,42 @@ bool ArenaTactics::Execute(Event /*event*/)
     if (!bg)
         return false;
 
+    uint32 instanceId = bg->GetInstanceID();
+    if (!instanceId)
+        return false;
+
     if (bg->GetStatus() == STATUS_WAIT_LEAVE)
+    {
+        arenaStartHoldByInstance.erase(instanceId);
         return BGStatusAction::LeaveBG(botAI);
+    }
 
     if (bg->GetStatus() != STATUS_IN_PROGRESS)
+    {
+        arenaStartHoldByInstance.erase(instanceId);
         return false;
+    }
 
     if (bot->isDead())
         return false;
 
     if (bot->isMoving())
         return false;
+
+    // Keep bots idle on Ring of Valor while players are still rising on the elevators.
+    if (bg->GetBgTypeID(true) == BATTLEGROUND_RV)
+    {
+        uint32& arenaStartHoldMs = arenaStartHoldByInstance[instanceId];
+        if (!arenaStartHoldMs)
+            arenaStartHoldMs = getMSTime();
+
+        if (GetMSTimeDiffToNow(arenaStartHoldMs) < RING_OF_VALOR_START_HOLD_MS)
+            return false;
+    }
+    else
+    {
+        arenaStartHoldByInstance.erase(instanceId);
+    }
 
     // startup phase
     if (bg->GetStartDelayTime() > 0)
@@ -4287,7 +4319,7 @@ bool ArenaTactics::Execute(Event /*event*/)
     Unit* target = bot->GetVictim();
     if (target)
     {
-        bool losBlocked = !bot->IsWithinLOSInMap(target) || fabs(bot->GetPositionZ() - target->GetPositionZ()) > 5.0f;
+        bool losBlocked = !ServerFacade::instance().IsWithinLOSInMap(bot, target) || fabs(bot->GetPositionZ() - target->GetPositionZ()) > 5.0f;
 
         if (losBlocked)
         {

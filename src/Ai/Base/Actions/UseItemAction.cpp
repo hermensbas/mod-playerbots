@@ -11,6 +11,43 @@
 #include "ItemUsageValue.h"
 #include "Playerbots.h"
 
+#include <cctype>
+#include <cstdlib>
+
+
+static bool TryParseLosIndex(std::string const& text, uint32& outIndex)
+{
+    std::string s = text;
+
+    // Trim spaces
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
+        s.erase(s.begin());
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+        s.pop_back();
+
+    if (s.empty())
+        return false;
+
+    if (s.front() == '#')
+        s.erase(s.begin());
+
+    if (s.empty())
+        return false;
+
+    for (char const c : s)
+    {
+        if (!std::isdigit(static_cast<unsigned char>(c)))
+            return false;
+    }
+
+    unsigned long v = std::strtoul(s.c_str(), nullptr, 10);
+    if (v == 0 || v > 1000000ul)
+        return false;
+
+    outIndex = static_cast<uint32>(v);
+    return true;
+}
+
 bool UseItemAction::Execute(Event event)
 {
     std::string name = event.getParam();
@@ -20,23 +57,68 @@ bool UseItemAction::Execute(Event event)
     std::vector<Item*> items = AI_VALUE2(std::vector<Item*>, "inventory items", name);
     GuidVector gos = chat->parseGameobjects(name);
 
+    // Numeric selection from the last "los gos" list: "u 1", "u #2", ...
+    if (gos.empty())
+    {
+        uint32 losIndex = 0;
+        if (TryParseLosIndex(name, losIndex))
+        {
+            Player* owner = event.getOwner();
+            if (!owner)
+                owner = botAI->GetMaster();
+
+            if (!owner)
+            {
+                botAI->TellError("Неизвестен владелец команды");
+                return false;
+            }
+
+            PlayerbotAI::LosGameObjectCacheEntry entry;
+            if (!PlayerbotAI::GetSharedLosGameObjects(owner->GetGUID(), entry) || entry.gameObjects.empty())
+            {
+                botAI->TellError("Список не найден или устарел, сделай los ещё раз");
+                return false;
+            }
+
+            if (losIndex < 1 || losIndex > entry.gameObjects.size())
+            {
+                botAI->TellError("Неверный номер объекта");
+                return false;
+            }
+
+            ObjectGuid goGuid = entry.gameObjects[losIndex - 1];
+            GameObject* go = botAI->GetGameObject(goGuid);
+            if (!go || !go->isSpawned())
+            {
+                botAI->TellError("Объект не найден");
+                return false;
+            }
+
+            gos.push_back(goGuid);
+        }
+    }
+
+    bool result = false;
+    bool hadItems = !items.empty();
+    bool hadGos = !gos.empty();
+
     if (gos.empty())
     {
         if (!items.empty())
-        {
-            return UseItemAuto(*items.begin());
-        }
+            result = UseItemAuto(*items.begin());
     }
     else
     {
         if (items.empty())
-            return UseGameObject(*gos.begin());
+            result = UseGameObject(*gos.begin());
         else
-            return UseItemOnGameObject(*items.begin(), *gos.begin());
+            result = UseItemOnGameObject(*items.begin(), *gos.begin());
     }
 
-    botAI->TellError("No items (or game objects) available");
-    return false;
+    if (!result && !hadItems && !hadGos)
+        botAI->TellError("No items (or game objects) available");
+
+    return result;
 }
 
 bool UseItemAction::UseGameObject(ObjectGuid guid)

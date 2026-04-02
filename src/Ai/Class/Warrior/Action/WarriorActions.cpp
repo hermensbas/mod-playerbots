@@ -6,6 +6,7 @@
 #include "WarriorActions.h"
 
 #include "Playerbots.h"
+#include "ServerFacade.h"
 
 bool CastSunderArmorAction::isUseful()
 {
@@ -222,7 +223,7 @@ bool CastShatteringThrowAction::isPossible()
         return false;
 
     // Check line of sight
-    if (!bot->IsWithinLOSInMap(target))
+    if (!ServerFacade::instance().IsWithinLOSInMap(bot, target))
         return false;
 
     // If the minimal checks above pass, simply return true.

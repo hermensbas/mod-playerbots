@@ -7,7 +7,8 @@
 
 #include "Playerbots.h"
 
-Event::Event(std::string const source, ObjectGuid object, Player* owner) : source(source), owner(owner)
+Event::Event(std::string const source, ObjectGuid object, Player* owner, uint32 type)
+    : source(source), owner(owner), type(type)
 {
     packet << object;
 }

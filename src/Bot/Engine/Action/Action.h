@@ -11,6 +11,7 @@
 
 class PlayerbotAI;
 class Unit;
+class WorldSession;
 
 class NextAction
 {
@@ -94,6 +95,7 @@ public:
     virtual float getRelevance() { return relevance; }
 
 protected:
+    WorldSession* GetBotSession() const;
     bool verbose;
     float relevance = 0;
 };

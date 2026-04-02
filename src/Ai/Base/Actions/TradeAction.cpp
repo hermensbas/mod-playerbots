@@ -12,6 +12,8 @@
 
 bool TradeAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     std::string const text = event.getParam();
 
     // If text starts with any excluded prefix, don't process it further.
@@ -40,7 +42,7 @@ bool TradeAction::Execute(Event event)
         {
             WorldPacket packet(CMSG_INITIATE_TRADE);
             packet << player->GetGUID();
-            bot->GetSession()->HandleInitiateTradeOpcode(packet);
+            session->HandleInitiateTradeOpcode(packet);
             return true;
         }
         else if (player->GetTrader() != bot)
@@ -52,7 +54,7 @@ bool TradeAction::Execute(Event event)
     {
         WorldPacket packet(CMSG_SET_TRADE_GOLD, 4);
         packet << copper;
-        bot->GetSession()->HandleSetTradeGoldOpcode(packet);
+        session->HandleSetTradeGoldOpcode(packet);
     }
 
     size_t pos = text.rfind(" ");
@@ -78,6 +80,8 @@ bool TradeAction::Execute(Event event)
 
 bool TradeAction::TradeItem(Item const* item, int8 slot)
 {
+    WorldSession* session = GetBotSession();
+
     int8 tradeSlot = -1;
     Item* itemPtr = const_cast<Item*>(item);
 
@@ -97,7 +101,7 @@ bool TradeAction::TradeItem(Item const* item, int8 slot)
 
                 WorldPacket packet(CMSG_CLEAR_TRADE_ITEM, 1);
                 packet << (uint8)tradeSlot;
-                bot->GetSession()->HandleClearTradeItemOpcode(packet);
+                session->HandleClearTradeItemOpcode(packet);
                 pTrade->SetItem(TradeSlots(i), nullptr);
                 return true;
             }
@@ -117,6 +121,6 @@ bool TradeAction::TradeItem(Item const* item, int8 slot)
     packet << (uint8)tradeSlot;
     packet << (uint8)item->GetBagSlot();
     packet << (uint8)item->GetSlot();
-    bot->GetSession()->HandleSetTradeItemOpcode(packet);
+    session->HandleSetTradeItemOpcode(packet);
     return true;
 }

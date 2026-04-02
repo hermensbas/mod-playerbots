@@ -4,6 +4,8 @@
 
 bool QuestConfirmAcceptAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     WorldPacket packet(event.getPacket());
     uint32 questId;
     packet >> questId;
@@ -18,6 +20,6 @@ bool QuestConfirmAcceptAction::Execute(Event event)
     std::ostringstream out;
     out << "Quest: " << chat->FormatQuest(quest) << " confirm accept";
     botAI->TellMaster(out);
-    bot->GetSession()->HandleQuestConfirmAccept(sendPacket);
+    session->HandleQuestConfirmAccept(sendPacket);
     return true;
 }

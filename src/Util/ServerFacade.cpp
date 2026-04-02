@@ -6,7 +6,25 @@
 #include "ServerFacade.h"
 #include "Player.h"
 
+#include "Playerbots.h"
+#include "Creature.h"
 #include "TargetedMovementGenerator.h"
+
+namespace
+{
+    bool IsLosHiddenNpc(WorldObject const* target)
+    {
+        if (!target)
+            return false;
+
+        Creature const* creature = target->ToCreature();
+        if (!creature)
+            return false;
+
+        uint32 entry = creature->GetEntry();
+        return entry == 3333333 || entry == 3333334;
+    }
+} // namespace
 
 float ServerFacade::GetDistance2d(Unit* unit, WorldObject* wo)
 {
@@ -76,4 +94,16 @@ Unit* ServerFacade::GetChaseTarget(Unit* target)
 void ServerFacade::SendPacket(Player* player, WorldPacket* packet)
 {
     player->GetSession()->SendPacket(packet);
+}
+
+bool ServerFacade::IsWithinLOSInMap(WorldObject* viewer, WorldObject* target)
+{
+    if (!viewer || !target)
+        return false;
+
+    Player* player = viewer->ToPlayer();
+    if (player && GET_PLAYERBOT_AI(player) && IsLosHiddenNpc(target))
+        return false;
+
+    return viewer->IsWithinLOSInMap(target);
 }

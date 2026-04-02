@@ -10,6 +10,8 @@
 
 bool ArenaTeamAcceptAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     WorldPacket p(event.getPacket());
     p.rpos(0);
     Player* inviter = nullptr;
@@ -38,7 +40,7 @@ bool ArenaTeamAcceptAction::Execute(Event event)
     if (accept)
     {
         WorldPacket data(CMSG_ARENA_TEAM_ACCEPT);
-        bot->GetSession()->HandleArenaTeamAcceptOpcode(data);
+        session->HandleArenaTeamAcceptOpcode(data);
         bot->Say("Thanks for the invite!", LANG_UNIVERSAL);
         LOG_INFO("playerbots", "Bot {} <{}> accepts Arena Team invite", bot->GetGUID().ToString().c_str(),
                  bot->GetName().c_str());
@@ -47,7 +49,7 @@ bool ArenaTeamAcceptAction::Execute(Event event)
     else
     {
         WorldPacket data(CMSG_ARENA_TEAM_DECLINE);
-        bot->GetSession()->HandleArenaTeamDeclineOpcode(data);
+        session->HandleArenaTeamDeclineOpcode(data);
         LOG_INFO("playerbots", "Bot {} <{}> declines Arena Team invite", bot->GetGUID().ToString().c_str(),
                  bot->GetName().c_str());
         return false;

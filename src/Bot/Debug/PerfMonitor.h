@@ -11,7 +11,10 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#include <thread>
 #include <cstdint>
+
+#include "Common.h"
 
 typedef std::vector<std::string> PerformanceStack;
 
@@ -36,13 +39,14 @@ enum PerformanceMetric
 class PerfMonitorOperation
 {
 public:
-    PerfMonitorOperation(PerformanceData* data, std::string const name, PerformanceStack* stack);
+    PerfMonitorOperation(PerformanceData* data, std::string const name, bool usesStack);
     void finish();
 
 private:
     PerformanceData* data;
     std::string const name;
-    PerformanceStack* stack;
+    bool usesStack;
+    std::thread::id ownerThread;
     std::chrono::microseconds started;
 };
 

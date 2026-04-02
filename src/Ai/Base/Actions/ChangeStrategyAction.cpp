@@ -39,7 +39,9 @@ bool ChangeNonCombatStrategyAction::Execute(Event event)
 {
     std::string const text = event.getParam();
 
-    uint32 account = bot->GetSession()->GetAccountId();
+    WorldSession* session = GetBotSession();
+
+    uint32 account = session->GetAccountId();
     if (sPlayerbotAIConfig.IsInRandomAccountList(account) && botAI->GetMaster() &&
         botAI->GetMaster()->GetSession()->GetSecurity() < SEC_GAMEMASTER)
     {

@@ -14,6 +14,8 @@
 
 bool AcceptInvitationAction::Execute(Event event)
 {
+    WorldSession* session = GetBotSession();
+
     Group* grp = bot->GetGroupInvite();
     if (!grp)
         return false;
@@ -41,7 +43,7 @@ bool AcceptInvitationAction::Execute(Event event)
     WorldPacket p;
     uint32 roles_mask = 0;
     p << roles_mask;
-    bot->GetSession()->HandleGroupAcceptOpcode(p);
+    session->HandleGroupAcceptOpcode(p);
 
     if (!bot->GetGroup() || !bot->GetGroup()->IsMember(inviter->GetGUID()))
         return false;

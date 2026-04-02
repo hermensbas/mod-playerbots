@@ -74,6 +74,8 @@ bool EnterVehicleAction::Execute(Event event)
 
 bool EnterVehicleAction::EnterVehicle(Unit* vehicleBase, bool moveIfFar)
 {
+    WorldSession* session = GetBotSession();
+
     float dist = ServerFacade::instance().GetDistance2d(bot, vehicleBase);
     if (dist > 40.0f)
         return false;
@@ -91,12 +93,14 @@ bool EnterVehicleAction::EnterVehicle(Unit* vehicleBase, bool moveIfFar)
 
     // dismount because bots can enter vehicle on mount
     WorldPacket emptyPacket;
-    bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+    session->HandleCancelMountAuraOpcode(emptyPacket);
     return true;
 }
 
 bool LeaveVehicleAction::Execute(Event /*event*/)
 {
+    WorldSession* session = GetBotSession();
+
     Vehicle* myVehicle = bot->GetVehicle();
     if (!myVehicle)
         return false;
@@ -106,7 +110,7 @@ bool LeaveVehicleAction::Execute(Event /*event*/)
         return false;
 
     WorldPacket p;
-    bot->GetSession()->HandleRequestVehicleExit(p);
+    session->HandleRequestVehicleExit(p);
 
     return true;
 }

@@ -233,7 +233,10 @@ bool AttackersValue::IsPossibleTarget(Unit* attacker, Player* bot, float /*range
 
 bool AttackersValue::IsValidTarget(Unit* attacker, Player* bot)
 {
-    return IsPossibleTarget(attacker, bot) && bot->IsWithinLOSInMap(attacker);
+    return IsPossibleTarget(attacker, bot) && ServerFacade::instance().IsWithinLOSInMap(bot, attacker);
+    // (attacker->GetThreatMgr().getCurrentVictim() || attacker->GetGuidValue(UNIT_FIELD_TARGET) ||
+    // attacker->GetGUID().IsPlayer() || attacker->GetGUID() ==
+    // GET_PLAYERBOT_AI(bot)->GetAiObjectContext()->GetValue<ObjectGuid>("pull target")->Get());
 }
 
 bool PossibleAddsValue::Calculate()

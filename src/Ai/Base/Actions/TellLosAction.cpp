@@ -4,47 +4,269 @@
  */
 
 #include "TellLosAction.h"
+#include <algorithm>
+#include <cctype>
+#include <istream>
+#include <set>
 #include <sstream>
+#include <vector>
 
 #include "ChatHelper.h"
 #include "Event.h"
 #include "ItemTemplate.h"
 #include "ObjectMgr.h"
 #include "Playerbots.h"
+#include "SharedDefines.h"
 #include "StatsWeightCalculator.h"
 #include "World.h"
+#include "Group.h"
+#include "WorldSession.h"
+
+namespace
+{
+struct LosRequest
+{
+    std::string category;
+    std::set<uint8> subgroups;
+};
+
+bool IsAllDigits(std::string const& token)
+{
+    return !token.empty() &&
+           std::all_of(token.begin(), token.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; });
+}
+
+std::string ToLowerCopy(std::string token)
+{
+    std::transform(token.begin(), token.end(), token.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return token;
+}
+
+void ParseSubgroupToken(std::string const& token, std::set<uint8>& subgroups)
+{
+    if (token.size() <= 6 || token.substr(0, 6) != "@group")
+        return;
+
+    std::string const groupSpec = token.substr(6);
+    std::istringstream ss(groupSpec);
+    std::string part;
+
+    while (std::getline(ss, part, ','))
+    {
+        if (part.empty())
+            continue;
+
+        size_t dashPos = part.find('-');
+        if (dashPos != std::string::npos)
+        {
+            std::string const fromToken = part.substr(0, dashPos);
+            std::string const toToken = part.substr(dashPos + 1);
+            if (!IsAllDigits(fromToken) || !IsAllDigits(toToken))
+                continue;
+
+            uint32 from = static_cast<uint32>(std::stoul(fromToken));
+            uint32 to = static_cast<uint32>(std::stoul(toToken));
+            if (from > to)
+                std::swap(from, to);
+
+            for (uint32 groupNumber = from; groupNumber <= to; ++groupNumber)
+            {
+                if (groupNumber >= 1 && groupNumber <= MAX_RAID_SUBGROUPS)
+                    subgroups.insert(static_cast<uint8>(groupNumber - 1));
+            }
+
+            continue;
+        }
+
+        if (!IsAllDigits(part))
+            continue;
+
+        uint32 groupNumber = static_cast<uint32>(std::stoul(part));
+        if (groupNumber >= 1 && groupNumber <= MAX_RAID_SUBGROUPS)
+            subgroups.insert(static_cast<uint8>(groupNumber - 1));
+    }
+}
+
+LosRequest ParseLosRequest(std::string const& param)
+{
+    LosRequest request;
+    std::vector<std::string> words;
+    std::istringstream iss(param);
+    std::string token;
+    while (iss >> token)
+    {
+        token = ToLowerCopy(token);
+
+        if (token.find("@group") == 0)
+        {
+            ParseSubgroupToken(token, request.subgroups);
+            continue;
+        }
+
+        words.push_back(token);
+    }
+
+    if (words.empty())
+        return request;
+
+    if (words.size() == 1)
+    {
+        request.category = words[0];
+        return request;
+    }
+
+    if (words.size() == 2 && words[0] == "game" && words[1] == "objects")
+    {
+        request.category = "game objects";
+        return request;
+    }
+
+    std::ostringstream joined;
+    for (size_t i = 0; i < words.size(); ++i)
+    {
+        if (i)
+            joined << ' ';
+        joined << words[i];
+    }
+
+    request.category = joined.str();
+    return request;
+}
+
+bool IsPartyLikeChat(uint32 type)
+{
+    return type == CHAT_MSG_PARTY || type == CHAT_MSG_PARTY_LEADER;
+}
+} // namespace
+
+static bool IsLosResponder(PlayerbotAI* botAI, Event const& event, LosRequest const& request, Player* owner)
+{
+    Player* bot = botAI ? botAI->GetBot() : nullptr;
+    if (!bot)
+        return false;
+
+    if (event.getType() == CHAT_MSG_WHISPER)
+        return true;
+
+    Group* group = bot->GetGroup();
+    if (!group)
+        return true;
+
+    bool filterBySubgroup = false;
+    std::set<uint8> targetSubgroups;
+
+    if (!request.subgroups.empty())
+    {
+        filterBySubgroup = true;
+        targetSubgroups = request.subgroups;
+    }
+    else if (group->isRaidGroup() && IsPartyLikeChat(event.getType()) && owner)
+    {
+        uint8 ownerSubgroup = group->GetMemberGroup(owner->GetGUID());
+        if (ownerSubgroup < MAX_RAID_SUBGROUPS)
+        {
+            filterBySubgroup = true;
+            targetSubgroups.insert(ownerSubgroup);
+        }
+    }
+
+    uint8 botSubgroup = group->GetMemberGroup(bot->GetGUID());
+    if (filterBySubgroup)
+    {
+        if (botSubgroup >= MAX_RAID_SUBGROUPS)
+            return false;
+
+        if (targetSubgroups.find(botSubgroup) == targetSubgroups.end())
+            return false;
+    }
+
+    // Prefer the first bot found in the group iteration.
+    Player* responder = nullptr;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* member = ref->GetSource();
+        if (!member)
+            continue;
+
+        WorldSession* session = member->GetSession();
+        if (!session || !session->IsBot())
+            continue;
+
+        if (filterBySubgroup && group->GetMemberGroup(member->GetGUID()) != botSubgroup)
+            continue;
+
+        responder = member;
+        break;
+    }
+
+    if (responder)
+        return responder == bot;
+
+    // Fallback: choose the smallest GUID among bots (stable selection).
+    ObjectGuid minGuid;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* member = ref->GetSource();
+        if (!member)
+            continue;
+
+        WorldSession* session = member->GetSession();
+        if (!session || !session->IsBot())
+            continue;
+
+        if (filterBySubgroup && group->GetMemberGroup(member->GetGUID()) != botSubgroup)
+            continue;
+
+        if (!minGuid || member->GetGUID() < minGuid)
+            minGuid = member->GetGUID();
+    }
+
+    if (!minGuid)
+        return true;
+
+    return bot->GetGUID() == minGuid;
+}
 
 bool TellLosAction::Execute(Event event)
 {
-    std::string const param = event.getParam();
+    Player* owner = event.getOwner();
+    if (!owner)
+        owner = botAI->GetMaster();
 
-    if (param.empty() || param == "targets")
+    LosRequest const request = ParseLosRequest(event.getParam());
+    std::string const& category = request.category;
+
+    if (!IsLosResponder(botAI, event, request, owner))
+        return true;
+
+    if (category.empty() || category == "targets")
     {
         ListUnits("--- Targets ---", *context->GetValue<GuidVector>("possible targets"));
         ListUnits("--- Targets (All) ---", *context->GetValue<GuidVector>("all targets"));
     }
 
-    if (param.empty() || param == "npcs")
+    if (category.empty() || category == "npcs")
     {
         ListUnits("--- NPCs ---", *context->GetValue<GuidVector>("nearest npcs"));
     }
 
-    if (param.empty() || param == "corpses")
+    if (category.empty() || category == "corpses")
     {
         ListUnits("--- Corpses ---", *context->GetValue<GuidVector>("nearest corpses"));
     }
 
-    if (param.empty() || param == "gos" || param == "game objects")
+    if (category.empty() || category == "gos" || category == "game objects")
     {
-        ListGameObjects("--- Game objects ---", *context->GetValue<GuidVector>("nearest game objects"));
+        ListGameObjects("--- Game objects ---", *context->GetValue<GuidVector>("nearest game objects"), owner);
     }
 
-    if (param.empty() || param == "players")
+    if (category.empty() || category == "players")
     {
         ListUnits("--- Friendly players ---", *context->GetValue<GuidVector>("nearest friendly players"));
     }
 
-    if (param.empty() || param == "triggers")
+    if (category.empty() || category == "triggers")
     {
         ListUnits("--- Triggers ---", *context->GetValue<GuidVector>("possible triggers"));
     }
@@ -64,15 +286,59 @@ void TellLosAction::ListUnits(std::string const title, GuidVector units)
         }
     }
 }
-void TellLosAction::ListGameObjects(std::string const title, GuidVector gos)
+void TellLosAction::ListGameObjects(std::string const title, GuidVector gos, Player* owner)
 {
     botAI->TellMaster(title);
 
+    struct ListedGo
+    {
+        ObjectGuid guid;
+        float dist;
+    };
+
+    std::vector<ListedGo> filtered;
+    filtered.reserve(gos.size());
+
     for (ObjectGuid const guid : gos)
     {
-        if (GameObject* go = botAI->GetGameObject(guid))
-            botAI->TellMaster(chat->FormatGameobject(go));
+        GameObject* go = botAI->GetGameObject(guid);
+        if (!go)
+            continue;
+
+        float dist = bot->GetDistance2d(go);
+        if (dist > 30.0f)
+            continue;
+
+        filtered.push_back({go->GetGUID(), dist});
     }
+
+    // Farthest first so the closest object is printed last (most visible in chat).
+    std::sort(filtered.begin(), filtered.end(), [](ListedGo const& a, ListedGo const& b) {
+        return a.dist > b.dist;
+    });
+
+    std::vector<ObjectGuid> listed;
+    listed.reserve(filtered.size());
+
+    uint32 index = 1;
+    for (ListedGo const& entry : filtered)
+    {
+        GameObject* go = botAI->GetGameObject(entry.guid);
+        if (!go)
+            continue;
+
+        listed.push_back(entry.guid);
+
+        uint32 distM = entry.dist >= 0.0f ? uint32(entry.dist + 0.5f) : 0;
+
+        std::ostringstream out;
+        out << "[" << index << "] (" << distM << "m) " << go->GetName();
+        botAI->TellMaster(out.str());
+        ++index;
+    }
+
+    if (owner)
+        PlayerbotAI::SetSharedLosGameObjects(owner->GetGUID(), listed, owner);
 }
 
 bool TellAuraAction::Execute(Event /*event*/)

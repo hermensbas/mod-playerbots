@@ -292,7 +292,7 @@ bool UseSoulstoneMasterAction::Execute(Event /*event*/)
     if (distance >= 30.0f)
         return false;
 
-    if (!bot->IsWithinLOSInMap(master))
+    if (!ServerFacade::instance().IsWithinLOSInMap(bot, master))
         return false;
 
     bot->SetSelection(master->GetGUID());

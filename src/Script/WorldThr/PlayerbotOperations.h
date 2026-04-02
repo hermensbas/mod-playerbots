@@ -269,9 +269,11 @@ class ArenaGroupFormationOperation : public PlayerbotOperation
 {
 public:
     ArenaGroupFormationOperation(ObjectGuid leaderGuid, std::vector<ObjectGuid> memberGuids,
-                                 uint32 requiredSize, uint32 arenaTeamId, std::string arenaTeamName)
+                                 uint32 requiredSize, uint32 arenaTeamId, std::string arenaTeamName, uint32 requiredLevel,
+                                 uint32 queueTypeId)
         : m_leaderGuid(leaderGuid), m_memberGuids(memberGuids),
-          m_requiredSize(requiredSize), m_arenaTeamId(arenaTeamId), m_arenaTeamName(arenaTeamName)
+          m_requiredSize(requiredSize), m_arenaTeamId(arenaTeamId), m_arenaTeamName(arenaTeamName),
+          m_requiredLevel(requiredLevel), m_queueTypeId(queueTypeId)
     {
     }
 
@@ -284,31 +286,16 @@ public:
             return false;
         }
 
-        // Step 1: Remove all members from their existing groups
-        for (const ObjectGuid& memberGuid : m_memberGuids)
+        // Temp arena teams should use only currently free wild bots.
+        if (leader->GetGroup() || leader->GetLevel() != m_requiredLevel || leader->IsInCombat() ||
+            leader->InBattleground() || leader->InArena() || leader->InBattlegroundQueue())
         {
-            Player* member = ObjectAccessor::FindPlayer(memberGuid);
-            if (!member)
-                continue;
-
-            Group* memberGroup = member->GetGroup();
-            if (memberGroup)
-            {
-                memberGroup->RemoveMember(memberGuid);
-                LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Removed {} from their existing group",
-                         member->GetName());
-            }
+            LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Leader {} is no longer eligible",
+                leader->GetName());
+            return false;
         }
 
-        // Step 2: Disband leader's existing group
-        Group* leaderGroup = leader->GetGroup();
-        if (leaderGroup)
-        {
-            leaderGroup->Disband(true);
-            LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Disbanded leader's existing group");
-        }
-
-        // Step 3: Create new group with leader
+        // Step 1: Create new group with leader
         Group* newGroup = new Group();
         if (!newGroup->Create(leader))
         {
@@ -322,7 +309,7 @@ public:
         LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Created new arena group with leader {}",
                  leader->GetName());
 
-        // Step 4: Add members to the new group
+        // Step 2: Add members to the new group
         uint32 addedMembers = 0;
         for (const ObjectGuid& memberGuid : m_memberGuids)
         {
@@ -334,9 +321,25 @@ public:
                 continue;
             }
 
-            if (member->GetLevel() < 70)
+            PlayerbotAI* memberBotAI = GET_PLAYERBOT_AI(member);
+            if (!memberBotAI || memberBotAI->HasRealPlayerMaster())
             {
-                LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Member {} is below level 70, skipping",
+                LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Member {} is no longer a free wild bot, skipping",
+                         member->GetName());
+                continue;
+            }
+
+            if (member->GetLevel() != m_requiredLevel)
+            {
+                LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Member {} is not level {}, skipping",
+                         member->GetName(), m_requiredLevel);
+                continue;
+            }
+
+            if (member->GetGroup() || member->IsInCombat() || member->InBattleground() || member->InArena() ||
+                member->InBattlegroundQueue() || !member->IsInWorld() || member->IsBeingTeleported())
+            {
+                LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Member {} is no longer available, skipping",
                          member->GetName());
                 continue;
             }
@@ -359,7 +362,7 @@ public:
             return false;
         }
 
-        // Step 5: Teleport members to leader and reset AI
+        // Step 3: Reset member AI. The actual queue flow will move the group if needed.
         for (const ObjectGuid& memberGuid : m_memberGuids)
         {
             Player* member = ObjectAccessor::FindPlayer(memberGuid);
@@ -368,13 +371,7 @@ public:
 
             PlayerbotAI* memberBotAI = PlayerbotsMgr::instance().GetPlayerbotAI(member);
             if (memberBotAI)
-                memberBotAI->Reset();
-
-            member->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
-            member->TeleportTo(leader->GetMapId(), leader->GetPositionX(), leader->GetPositionY(),
-                              leader->GetPositionZ(), 0);
-
-            LOG_DEBUG("playerbots", "ArenaGroupFormationOperation: Teleported {} to leader", member->GetName());
+                memberBotAI->RequestDeferredReset();
         }
 
         // Check if we have enough members
@@ -388,6 +385,13 @@ public:
 
         LOG_INFO("playerbots", "Team #{} <{}> Group is ready for match with {} members",
                 m_arenaTeamId, m_arenaTeamName, newGroup->GetMembersCount());
+
+        PlayerbotAI* leaderBotAI = GET_PLAYERBOT_AI(leader);
+        if (leaderBotAI)
+        {
+            leaderBotAI->RequestDeferredBgJoin(m_queueTypeId, 1);
+        }
+
         return true;
     }
 
@@ -409,6 +413,8 @@ private:
     uint32 m_requiredSize;
     uint32 m_arenaTeamId;
     std::string m_arenaTeamName;
+    uint32 m_requiredLevel;
+    uint32 m_queueTypeId;
 };
 
 // Bot logout group cleanup operation

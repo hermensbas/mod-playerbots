@@ -5,13 +5,18 @@
 
 #include "PlayerbotMgr.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <unordered_set>
+#include <deque>
+#include <unordered_map>
 #include <openssl/sha.h>
 #include <iomanip>
 #include <algorithm>
+#include <vector>
 
 #include "ChannelMgr.h"
 #include "CharacterCache.h"
@@ -37,12 +42,161 @@
 #include "WorldSessionMgr.h"
 #include "DatabaseEnv.h"
 
+
+namespace
+{
+constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
+
+std::mutex pendingSafeLogoutMutex;
+std::unordered_set<ObjectGuid> pendingSafeLogoutGuids;
+std::atomic<bool> hasPendingSafeLogouts{false};
+std::atomic<bool> forceShutdownSafeLogouts{false};
+
+void QueuePendingSafeLogout(ObjectGuid guid)
+{
+    if (!guid)
+        return;
+
+    {
+        std::lock_guard<std::mutex> guard(pendingSafeLogoutMutex);
+        pendingSafeLogoutGuids.insert(guid);
+    }
+
+    hasPendingSafeLogouts.store(true, std::memory_order_release);
+}
+
+bool HasQueuedPendingSafeLogouts()
+{
+    if (!hasPendingSafeLogouts.load(std::memory_order_acquire))
+        return false;
+
+    std::lock_guard<std::mutex> guard(pendingSafeLogoutMutex);
+    return !pendingSafeLogoutGuids.empty();
+}
+
+template <class F>
+void ForEachControlledRandomBot(Player* master, F&& fn)
+{
+    if (!master)
+        return;
+
+    static thread_local std::vector<ObjectGuid> tlsControlledGuids;
+
+    std::vector<ObjectGuid> controlledGuids;
+    controlledGuids.swap(tlsControlledGuids);
+    controlledGuids.clear();
+
+    sRandomPlayerbotMgr.GetMasterControlledRandomBotGuidsSnapshot(master->GetGUID(), controlledGuids);
+
+    for (ObjectGuid const& guid : controlledGuids)
+    {
+        Player* bot = sRandomPlayerbotMgr.GetPlayerBot(guid);
+        if (!bot)
+            continue;
+
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (!botAI || botAI->IsRealPlayer())
+            continue;
+
+        if (botAI->GetMaster() != master)
+            continue;
+        fn(bot, botAI);
+    }
+
+    tlsControlledGuids.swap(controlledGuids);
+}
+
+void ProcessBotLogoutInSafeWorldUpdate(Player* bot, PlayerbotAI* botAI)
+{
+    if (!bot || !botAI)
+        return;
+
+    WorldSession* botSession = bot->GetSession();
+    if (!botSession)
+    {
+        botAI->ClearLogoutQueued();
+        return;
+    }
+
+    if (bot->IsDuringRemoveFromWorld())
+        return;
+
+    // Finalize any pending teleport inside the regular playerbot session update flow
+    // before we tear the character down via LogoutPlayer().
+    if (bot->IsBeingTeleported())
+    {
+        botAI->HandleTeleportAck();
+        return;
+    }
+
+    if (Group* group = bot->GetGroup(); group && !bot->InBattleground() && !bot->InBattlegroundQueue() &&
+        botAI->HasActivePlayerMaster())
+    {
+        PlayerbotRepository::instance().Save(botAI);
+    }
+
+    botAI->TellMaster("Goodbye!");
+    botSession->LogoutPlayer(true);
+}
+
+bool QueueSafeBotLogoutRequest(ObjectGuid guid)
+{
+    Player* bot = ObjectAccessor::FindConnectedPlayer(guid);
+    if (!bot)
+        return false;
+
+    PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(guid);
+    if (!botAI)
+        return false;
+
+    WorldSession* botSession = bot->GetSession();
+    if (!botSession || botSession->isLogingOut())
+        return false;
+
+    if (botAI->MarkLogoutQueued())
+        bot->SaveToDB(false, false);
+
+    QueuePendingSafeLogout(guid);
+    return true;
+}
+
+bool HasConnectedRealMaster(PlayerbotAI* botAI)
+{
+    if (!botAI)
+        return false;
+
+    ObjectGuid const masterGuid = botAI->GetMasterGuid();
+    if (!masterGuid)
+        return false;
+
+    return ObjectAccessor::FindConnectedPlayer(masterGuid) != nullptr;
+}
+
+bool IsTrackedByAnyLiveHolder(ObjectGuid guid, PlayerbotAI* botAI)
+{
+    if (sRandomPlayerbotMgr.GetPlayerBot(guid))
+        return true;
+
+    if (!botAI)
+        return false;
+
+    ObjectGuid const masterGuid = botAI->GetMasterGuid();
+    if (!masterGuid)
+        return false;
+
+    if (PlayerbotMgr* masterMgr = sPlayerbotsMgr.GetPlayerbotMgr(masterGuid))
+        return masterMgr->GetPlayerBot(guid) != nullptr;
+
+    return false;
+}
+} // namespace
+
 class BotInitGuard
 {
 public:
     BotInitGuard(ObjectGuid guid) : guid(guid), active(false)
     {
-        if (!botsBeingInitialized.contains(guid))
+        if (botsBeingInitialized.find(guid) == botsBeingInitialized.end())
         {
             botsBeingInitialized.insert(guid);
             active = true;
@@ -66,7 +220,303 @@ private:
 std::unordered_set<ObjectGuid> BotInitGuard::botsBeingInitialized;
 std::unordered_set<ObjectGuid> PlayerbotHolder::botLoading;
 
+namespace
+{
+    static constexpr uint32 BOT_INIT_COOLDOWN_MS = 3000;          // Per-bot cooldown (request + successful init).
+    static constexpr uint32 BOT_INIT_QUEUE_STEP_MS = 250;         // Minimum delay between init executions.
+    static constexpr size_t BOT_INIT_QUEUE_MAX_SIZE = 200;        // Global queue size limit.
+    static constexpr size_t BOT_INIT_QUEUE_MAX_PER_MASTER = 40;   // Per-master queue size limit.
+    static constexpr uint8 BOT_INIT_QUEUE_MAX_POSTPONE = 20;      // Safety cap to avoid infinite requeue loops.
+
+    struct BotInitRequest
+    {
+        ObjectGuid botGuid;
+        ObjectGuid masterGuid;
+        std::string cmd;
+        bool admin = false;
+        uint8 postponeCount = 0;
+    };
+
+    class BotInitQueue
+    {
+    public:
+        static BotInitQueue& Instance()
+        {
+            static BotInitQueue instance;
+            return instance;
+        }
+
+        std::string Enqueue(ObjectGuid botGuid, ObjectGuid masterGuid, std::string const& cmd, bool admin)
+        {
+            if (botGuid.IsEmpty() || masterGuid.IsEmpty())
+                return "ERROR: Invalid init request.";
+
+            // Do not enqueue duplicates.
+            if (_queuedBots.find(botGuid) != _queuedBots.end())
+                return "ok (already queued)";
+            // Enforce per-bot cooldown (request + completion).
+            uint32 remainMs = 0;
+
+            auto itReq = _lastInitRequestMs.find(botGuid);
+            if (itReq != _lastInitRequestMs.end())
+            {
+                uint32 elapsed = GetMSTimeDiffToNow(itReq->second);
+                if (elapsed < BOT_INIT_COOLDOWN_MS)
+                    remainMs = std::max(remainMs, BOT_INIT_COOLDOWN_MS - elapsed);
+            }
+
+            auto itDone = _lastInitDoneMs.find(botGuid);
+            if (itDone != _lastInitDoneMs.end())
+            {
+                uint32 elapsed = GetMSTimeDiffToNow(itDone->second);
+                if (elapsed < BOT_INIT_COOLDOWN_MS)
+                    remainMs = std::max(remainMs, BOT_INIT_COOLDOWN_MS - elapsed);
+            }
+
+            if (remainMs > 0)
+            {
+                uint32 remain = (remainMs + 999) / 1000;
+                return "ERROR: Init cooldown, wait " + std::to_string(remain) + "s.";
+            }
+            // Prevent queue flooding.
+            if (!admin)
+            {
+                if (_queue.size() >= BOT_INIT_QUEUE_MAX_SIZE)
+                    return "ERROR: Init queue is full, please try again later.";
+
+                uint32 masterCount = 0;
+                auto it = _queuedPerMaster.find(masterGuid);
+                if (it != _queuedPerMaster.end())
+                    masterCount = it->second;
+
+                if (masterCount >= BOT_INIT_QUEUE_MAX_PER_MASTER)
+                    return "ERROR: Too many init requests queued for you, please wait.";
+
+                _queuedPerMaster[masterGuid] = masterCount + 1;
+            }
+
+            _lastInitRequestMs[botGuid] = getMSTime();
+
+            _queuedBots.insert(botGuid);
+            _queue.push_back(BotInitRequest{botGuid, masterGuid, cmd, admin, 0});
+            return "ok (queued)";
+        }
+
+        void Update([[maybe_unused]] uint32 diff)
+        {
+            if (_queue.empty())
+                return;
+
+            if (_lastExecMs && GetMSTimeDiffToNow(_lastExecMs) < BOT_INIT_QUEUE_STEP_MS)
+                return;
+
+            BotInitRequest request = _queue.front();
+
+            // Validate bot and master are still present.
+            Player* bot = nullptr;
+
+            bot = ObjectAccessor::FindPlayer(request.botGuid);
+            if (!bot)
+                bot = sRandomPlayerbotMgr.GetPlayerBot(request.botGuid);
+
+            Player* master = ObjectAccessor::FindConnectedPlayer(request.masterGuid);
+
+            // Drop invalid requests (bot offline / master offline).
+            if (!bot || !master)
+            {
+                PopFrontAndCleanup(request);
+                _lastExecMs = getMSTime();
+                return;
+            }
+
+            // Must still be an addclass bot.
+            if (!sRandomPlayerbotMgr.IsAddclassBot(request.botGuid.GetCounter()))
+            {
+                PopFrontAndCleanup(request);
+                _lastExecMs = getMSTime();
+                return;
+            }
+
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+            if (!botAI)
+            {
+                PopFrontAndCleanup(request);
+                _lastExecMs = getMSTime();
+                return;
+            }
+
+            // Ensure the bot is still controlled by the same master.
+            if (Player* currentMaster = botAI->GetMaster())
+            {
+                if (currentMaster->GetGUID() != request.masterGuid)
+                {
+                    PopFrontAndCleanup(request);
+                    _lastExecMs = getMSTime();
+                    return;
+                }
+            }
+            else
+            {
+                PopFrontAndCleanup(request);
+                _lastExecMs = getMSTime();
+                return;
+            }
+
+            // Respect restrictions (combat / auto-init only).
+            std::string effectiveCmd = request.cmd;
+            if (effectiveCmd == "init")
+                effectiveCmd = "init=auto";
+
+            if (!request.admin)
+            {
+                if (master->IsInCombat() || bot->IsInCombat())
+                {
+                    PostponeOrDrop(request);
+                    return;
+                }
+
+                if (master->GetSession() && master->GetSession()->GetSecurity() <= SEC_PLAYER &&
+                    sPlayerbotAIConfig.autoInitOnly && effectiveCmd != "init=auto")
+                {
+                    // Not allowed - drop.
+                    PopFrontAndCleanup(request);
+                    _lastExecMs = getMSTime();
+                    return;
+                }
+            }
+
+            // Prevent parallel init for the same bot.
+            BotInitGuard guard(bot->GetGUID());
+            if (guard.IsLocked())
+            {
+                PostponeOrDrop(request);
+                return;
+            }
+
+            // Execute init.
+            ExecuteInit(bot, master, effectiveCmd);
+
+            // Start cooldown at the end of a successful init.
+            _lastInitDoneMs[request.botGuid] = getMSTime();
+
+            PopFrontAndCleanup(request);
+            _lastExecMs = getMSTime();
+        }
+
+    private:
+        BotInitQueue() = default;
+
+        void ExecuteInit(Player* bot, Player* master, std::string const& cmd)
+        {
+            if (!bot || !master)
+                return;
+
+            int gs = 0;
+            if (cmd == "init=white" || cmd == "init=common")
+            {
+                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_NORMAL);
+                factory.Randomize(false);
+            }
+            else if (cmd == "init=green" || cmd == "init=uncommon")
+            {
+                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_UNCOMMON);
+                factory.Randomize(false);
+            }
+            else if (cmd == "init=blue" || cmd == "init=rare")
+            {
+                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_RARE);
+                factory.Randomize(false);
+            }
+            else if (cmd == "init=epic" || cmd == "init=purple")
+            {
+                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_EPIC);
+                factory.Randomize(false);
+            }
+            else if (cmd == "init=legendary" || cmd == "init=yellow")
+            {
+                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_LEGENDARY);
+                factory.Randomize(false);
+            }
+            else if (cmd == "init=auto")
+            {
+                uint32 mixedGearScore = PlayerbotAI::GetMixedGearScore(master, true, false, 12) *
+                                        sPlayerbotAIConfig.autoInitEquipLevelLimitRatio;
+
+                // Work around: distinguish from 0 if no gear.
+                if (mixedGearScore == 0)
+                    mixedGearScore = 1;
+
+                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_LEGENDARY, mixedGearScore);
+                factory.Randomize(false);
+            }
+            else if (cmd.rfind("init=", 0) == 0 && sscanf(cmd.c_str(), "init=%d", &gs) == 1)
+            {
+                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_LEGENDARY, gs);
+                factory.Randomize(false);
+            }
+        }
+
+        void PostponeOrDrop(BotInitRequest const& request)
+        {
+            // Pop front.
+            _queue.pop_front();
+
+            BotInitRequest postponed = request;
+            postponed.postponeCount++;
+
+            if (postponed.postponeCount >= BOT_INIT_QUEUE_MAX_POSTPONE)
+            {
+                // Drop permanently.
+                CleanupBookkeeping(postponed);
+                _lastExecMs = getMSTime();
+                return;
+            }
+
+            // Requeue at the end.
+            _queue.push_back(postponed);
+            _lastExecMs = getMSTime();
+        }
+
+        void PopFrontAndCleanup(BotInitRequest const& request)
+        {
+            _queue.pop_front();
+            CleanupBookkeeping(request);
+        }
+
+        void CleanupBookkeeping(BotInitRequest const& request)
+        {
+            _queuedBots.erase(request.botGuid);
+
+            if (!request.admin)
+            {
+                auto it = _queuedPerMaster.find(request.masterGuid);
+                if (it != _queuedPerMaster.end())
+                {
+                    if (it->second > 0)
+                        it->second--;
+
+                    if (it->second == 0)
+                        _queuedPerMaster.erase(it);
+                }
+            }
+        }
+
+    private:
+        std::deque<BotInitRequest> _queue;
+        std::unordered_set<ObjectGuid> _queuedBots;
+        std::unordered_map<ObjectGuid, uint32> _lastInitRequestMs;
+        std::unordered_map<ObjectGuid, uint32> _lastInitDoneMs;
+        std::unordered_map<ObjectGuid, uint32> _queuedPerMaster;
+        uint32 _lastExecMs = 0;
+    };
+} // namespace
+
 PlayerbotHolder::PlayerbotHolder() : PlayerbotAIBase(false) {}
+
+void PlayerbotHolder::UpdateInitQueue(uint32 diff)
+{
+    BotInitQueue::Instance().Update(diff);
+}
 class PlayerbotLoginQueryHolder : public LoginQueryHolder
 {
 private:
@@ -231,26 +681,59 @@ void PlayerbotHolder::HandlePlayerBotLoginCallback(PlayerbotLoginQueryHolder con
 
 void PlayerbotHolder::UpdateSessions()
 {
-    for (PlayerBotMap::const_iterator itr = GetPlayerBotsBegin(); itr != GetPlayerBotsEnd(); ++itr)
+    for (PlayerBotMap::const_iterator itr = GetPlayerBotsBegin(); itr != GetPlayerBotsEnd();)
     {
         Player* const bot = itr->second;
+        ++itr;
+
+        if (!bot)
+            continue;
+
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (!botAI)
+            continue;
+
+        if (botAI->IsLogoutQueued())
+        {
+            ProcessBotLogoutInSafeWorldUpdate(bot, botAI);
+            continue;
+        }
+
+        if (botAI->HasPendingDeferredTeleport())
+        {
+            if (bot->IsBeingTeleported())
+                botAI->HandleTeleportAck();
+            else
+                botAI->ProcessPendingDeferredTeleport();
+            continue;
+        }
+
+        if (botAI->HasPendingSafeSummonTeleport())
+        {
+            if (bot->IsBeingTeleported())
+                botAI->HandleTeleportAck();
+            else
+                botAI->ProcessPendingSafeSummonTeleport();
+            continue;
+        }
+
         if (bot->IsBeingTeleported())
         {
-            PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-            if (botAI)
-            {
-                botAI->HandleTeleportAck();
-            }
+            botAI->HandleTeleportAck();
         }
         else if (bot->IsInWorld())
         {
-            HandleBotPackets(bot->GetSession());
+            if (WorldSession* session = bot->GetSession())
+                HandleBotPackets(session);
         }
     }
 }
 
 void PlayerbotHolder::HandleBotPackets(WorldSession* session)
 {
+    if (!session)
+        return;
+
     WorldPacket* packet;
     while (session->GetPacketQueue().next(packet))
     {
@@ -318,117 +801,96 @@ void PlayerbotMgr::CancelLogout()
         }
     }
 
-    for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin();
-         it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
+    ForEachControlledRandomBot(master, [&](Player* bot, PlayerbotAI* /*botAI*/)
     {
-        Player* const bot = it->second;
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (!botAI || botAI->IsRealPlayer())
-            continue;
+        WorldSession* botSession = bot->GetSession();
+        if (!botSession)
+            return;
 
-        if (botAI->GetMaster() != master)
-            continue;
-
-        if (bot->GetSession()->isLogingOut())
+        if (botSession->isLogingOut())
         {
             WorldPackets::Character::LogoutCancel data = WorldPacket(CMSG_LOGOUT_CANCEL);
-            bot->GetSession()->HandleLogoutCancelOpcode(data);
+            botSession->HandleLogoutCancelOpcode(data);
         }
-    }
+    });
 }
 
 void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
 {
     if (Player* bot = GetPlayerBot(guid))
     {
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (!botAI)
-            return;
-
-        // Queue group cleanup operation for world thread
-        auto cleanupOp = std::make_unique<BotLogoutGroupCleanupOperation>(guid);
-        PlayerbotWorldThreadProcessor::instance().QueueOperation(std::move(cleanupOp));
-
         LOG_DEBUG("playerbots", "Bot {} logging out", bot->GetName().c_str());
-        bot->SaveToDB(false, false);
+        RequestSafeBotLogout(guid);
+    }
+}
 
-        WorldSession* botWorldSessionPtr = bot->GetSession();
-        WorldSession* masterWorldSessionPtr = nullptr;
+bool PlayerbotHolder::RequestSafeBotLogout(ObjectGuid guid)
+{
+    return QueueSafeBotLogoutRequest(guid);
+}
 
-        if (botWorldSessionPtr->isLogingOut())
+void PlayerbotHolder::ProcessPendingSafeLogouts()
+{
+    if (!hasPendingSafeLogouts.load(std::memory_order_acquire))
+        return;
+
+    std::vector<ObjectGuid> pendingGuids;
+    {
+        std::lock_guard<std::mutex> guard(pendingSafeLogoutMutex);
+        if (pendingSafeLogoutGuids.empty())
+        {
+            hasPendingSafeLogouts.store(false, std::memory_order_release);
             return;
-
-        Player* master = botAI->GetMaster();
-        if (master)
-            masterWorldSessionPtr = master->GetSession();
-
-        // check for instant logout
-        bool logout = botWorldSessionPtr->ShouldLogOut(time(nullptr));
-
-        if (masterWorldSessionPtr && masterWorldSessionPtr->ShouldLogOut(time(nullptr)))
-            logout = true;
-
-        if (masterWorldSessionPtr && !masterWorldSessionPtr->GetPlayer())
-            logout = true;
-
-        if (bot->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_RESTING) || bot->HasUnitState(UNIT_STATE_IN_FLIGHT) ||
-            botWorldSessionPtr->GetSecurity() >= (AccountTypes)sWorld->getIntConfig(CONFIG_INSTANT_LOGOUT))
-        {
-            logout = true;
         }
 
-        if (master &&
-            (master->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_RESTING) || master->HasUnitState(UNIT_STATE_IN_FLIGHT) ||
-             (masterWorldSessionPtr &&
-              masterWorldSessionPtr->GetSecurity() >= (AccountTypes)sWorld->getIntConfig(CONFIG_INSTANT_LOGOUT))))
+        pendingGuids.reserve(pendingSafeLogoutGuids.size());
+        for (ObjectGuid const& guid : pendingSafeLogoutGuids)
+            pendingGuids.push_back(guid);
+
+        pendingSafeLogoutGuids.clear();
+        hasPendingSafeLogouts.store(false, std::memory_order_release);
+    }
+
+    for (ObjectGuid const& guid : pendingGuids)
+    {
+        Player* bot = ObjectAccessor::FindConnectedPlayer(guid);
+        if (!bot)
+            continue;
+
+        PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(guid);
+        if (!botAI || !botAI->IsLogoutQueued())
+            continue;
+
+        if (!forceShutdownSafeLogouts.load(std::memory_order_acquire) &&
+            IsTrackedByAnyLiveHolder(guid, botAI) && HasConnectedRealMaster(botAI))
         {
-            logout = true;
+            QueuePendingSafeLogout(guid);
+            continue;
         }
 
-        TravelTarget* target = nullptr;
-        if (botAI->GetAiObjectContext())  // Maybe some day re-write to delate all pointer values.
-        {
-            target = botAI->GetAiObjectContext()->GetValue<TravelTarget*>("travel target")->Get();
-        }
+        ProcessBotLogoutInSafeWorldUpdate(bot, botAI);
 
-        // Peiru: Allow bots to always instant logout to see if this resolves logout crashes
-        logout = true;
+        Player* stillConnectedBot = ObjectAccessor::FindConnectedPlayer(guid);
+        PlayerbotAI* stillConnectedAI = PlayerbotsMgr::instance().GetPlayerbotAI(guid);
+        if (stillConnectedBot && stillConnectedAI && stillConnectedAI->IsLogoutQueued())
+            QueuePendingSafeLogout(guid);
+    }
+}
 
-        // if no instant logout, request normal logout
-        if (!logout)
-        {
-            if (bot->GetSession()->isLogingOut())
-                return;
-            else if (bot)
-            {
-                botAI->TellMaster("I'm logging out!");
-                WorldPackets::Character::LogoutRequest data = WorldPacket(CMSG_LOGOUT_REQUEST);
-                botWorldSessionPtr->HandleLogoutRequestOpcode(data);
-                if (!bot)
-                {
-                    RemoveFromPlayerbotsMap(guid);
-                    delete botWorldSessionPtr;
-                    if (target)
-                        delete target;
-                }
-                return;
-            }
-            else
-            {
-                RemoveFromPlayerbotsMap(guid);     // deletes bot player ptr inside this WorldSession PlayerBotMap
-                delete botWorldSessionPtr;  // finally delete the bot's WorldSession
-                if (target)
-                    delete target;
-            }
-            return;
-        }  // if instant logout possible, do it
-        else if (bot && (logout || !botWorldSessionPtr->isLogingOut()))
-        {
-            botAI->TellMaster("Goodbye!");
-            RemoveFromPlayerbotsMap(guid);                  // deletes bot player ptr inside this WorldSession PlayerBotMap
-            botWorldSessionPtr->LogoutPlayer(true);  // this will delete the bot Player object and PlayerbotAI object
-            delete botWorldSessionPtr;               // finally delete the bot's WorldSession
-        }
+void PlayerbotHolder::LogoutAllBotsForShutdown()
+{
+    forceShutdownSafeLogouts.store(true, std::memory_order_release);
+
+    sPlayerbotsMgr.LogoutAllPlayerBots();
+    sRandomPlayerbotMgr.LogoutAllBots();
+
+    constexpr uint8 maxDrainPasses = 4;
+    for (uint8 pass = 0; pass < maxDrainPasses; ++pass)
+    {
+        if (!HasQueuedPendingSafeLogouts())
+            break;
+
+        ProcessPendingSafeLogouts();
     }
 }
 
@@ -441,6 +903,8 @@ void PlayerbotHolder::DisablePlayerBot(ObjectGuid guid)
         {
             return;
         }
+        // Keep master->controlled random-bots index clean (safe no-op if not tracked).
+        sRandomPlayerbotMgr.OnRandomBotLoggedOut(guid);
         botAI->TellMaster("Goodbye!");
         bot->StopMoving();
         bot->GetMotionMaster()->Clear();
@@ -778,67 +1242,21 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
     {
         if (Player* master = GET_PLAYERBOT_AI(bot)->GetMaster())
         {
-            if (master->GetSession()->GetSecurity() <= SEC_PLAYER && sPlayerbotAIConfig.autoInitOnly &&
-                cmd != "init=auto")
+            std::string effectiveCmd = cmd;
+            if (effectiveCmd == "init")
+                effectiveCmd = "init=auto";
+
+            // Keep the legacy restriction: when auto-init-only is enabled, non-GM players may only use init=auto.
+            if (master->GetSession() && master->GetSession()->GetSecurity() <= SEC_PLAYER &&
+                sPlayerbotAIConfig.autoInitOnly && effectiveCmd != "init=auto")
             {
                 return "The command is not allowed, use init=auto instead.";
             }
 
-            //  Use boot guard
-            BotInitGuard guard(bot->GetGUID());
-            if (guard.IsLocked())
+            // Throttle init requests: queue + per-bot cooldown to avoid server stalls from init spam.
+            if (effectiveCmd.rfind("init=", 0) == 0)
             {
-                return "Initialization already in progress, please wait.";
-            }
-
-            int gs;
-            if (cmd == "init=white" || cmd == "init=common")
-            {
-                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_NORMAL);
-                factory.Randomize(false);
-                return "ok";
-            }
-            else if (cmd == "init=green" || cmd == "init=uncommon")
-            {
-                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_UNCOMMON);
-                factory.Randomize(false);
-                return "ok";
-            }
-            else if (cmd == "init=blue" || cmd == "init=rare")
-            {
-                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_RARE);
-                factory.Randomize(false);
-                return "ok";
-            }
-            else if (cmd == "init=epic" || cmd == "init=purple")
-            {
-                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_EPIC);
-                factory.Randomize(false);
-                return "ok";
-            }
-            else if (cmd == "init=legendary" || cmd == "init=yellow")
-            {
-                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_LEGENDARY);
-                factory.Randomize(false);
-                return "ok";
-            }
-            else if (cmd == "init=auto")
-            {
-                uint32 mixedGearScore = PlayerbotAI::GetMixedGearScore(master, true, false, 12) *
-                                        sPlayerbotAIConfig.autoInitEquipLevelLimitRatio;
-                // work around: distinguish from 0 if no gear
-                if (mixedGearScore == 0)
-                    mixedGearScore = 1;
-                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_LEGENDARY, mixedGearScore);
-                factory.Randomize(false);
-                return "ok, gear score limit: " + std::to_string(mixedGearScore / PlayerbotAI::GetItemScoreMultiplier(ItemQualities(ITEM_QUALITY_EPIC))) +
-                       "(for epic)";
-            }
-            else if (cmd.starts_with("init=") && sscanf(cmd.c_str(), "init=%d", &gs) != -1)
-            {
-                PlayerbotFactory factory(bot, master->GetLevel(), ITEM_QUALITY_LEGENDARY, gs);
-                factory.Randomize(false);
-                return "ok, gear score limit: " + std::to_string(gs / PlayerbotAI::GetItemScoreMultiplier(ItemQualities(ITEM_QUALITY_EPIC))) + "(for epic)";
+                return BotInitQueue::Instance().Enqueue(bot->GetGUID(), master->GetGUID(), effectiveCmd, admin);
             }
         }
 
@@ -1031,7 +1449,7 @@ std::vector<std::string> PlayerbotHolder::HandlePlayerbotCommand(char const* arg
             }
         }
         int32 gs;
-        if (sscanf(cmd, "initself=%d", &gs) != -1)
+        if (sscanf(cmd, "initself=%d", &gs) == 1)
         {
             if (master->GetSession()->GetSecurity() >= SEC_GAMEMASTER)
             {
@@ -1112,6 +1530,11 @@ std::vector<std::string> PlayerbotHolder::HandlePlayerbotCommand(char const* arg
         if (sPlayerbotAIConfig.addClassCommand == 0 && master->GetSession()->GetSecurity() < SEC_GAMEMASTER)
         {
             messages.push_back("You do not have permission to create bot by addclass command");
+            return messages;
+        }
+        if (master->GetZoneId() == WINTERGRASP_ZONE_ID)
+        {
+            messages.push_back("You cannot create addclass bots in Wintergrasp");
             return messages;
         }
         if (!charname)
@@ -1516,7 +1939,7 @@ void PlayerbotMgr::HandleCommand(uint32 type, std::string const text)
     if (!master)
         return;
 
-    if (text.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
+    if (!sPlayerbotAIConfig.commandSeparator.empty() && text.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
     {
         std::vector<std::string> commands;
         split(commands, text, sPlayerbotAIConfig.commandSeparator.c_str());
@@ -1536,14 +1959,10 @@ void PlayerbotMgr::HandleCommand(uint32 type, std::string const text)
             botAI->HandleCommand(type, text, master);
     }
 
-    for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin();
-         it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
+    ForEachControlledRandomBot(master, [&](Player* /*bot*/, PlayerbotAI* botAI)
     {
-        Player* const bot = it->second;
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (botAI && botAI->GetMaster() == master)
-            botAI->HandleCommand(type, text, master);
-    }
+        botAI->HandleCommand(type, text, master);
+    });
 }
 
 void PlayerbotMgr::HandleMasterIncomingPacket(WorldPacket const& packet)
@@ -1558,14 +1977,10 @@ void PlayerbotMgr::HandleMasterIncomingPacket(WorldPacket const& packet)
             botAI->HandleMasterIncomingPacket(packet);
     }
 
-    for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin();
-         it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
+    ForEachControlledRandomBot(GetMaster(), [&](Player* /*bot*/, PlayerbotAI* botAI)
     {
-        Player* const bot = it->second;
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (botAI && botAI->GetMaster() == GetMaster())
-            botAI->HandleMasterIncomingPacket(packet);
-    }
+        botAI->HandleMasterIncomingPacket(packet);
+    });
 
     switch (packet.GetOpcode())
     {
@@ -1586,6 +2001,14 @@ void PlayerbotMgr::HandleMasterIncomingPacket(WorldPacket const& packet)
 
 void PlayerbotMgr::HandleMasterOutgoingPacket(WorldPacket const& packet)
 {
+    // If this master controls no bots at all, skip forwarding entirely (major perf win during raids without bots).
+    Player* masterPlayer = GetMaster();
+    if (!masterPlayer)
+        return;
+
+    if (GetPlayerbotsCount() == 0 && !sRandomPlayerbotMgr.HasMasterControlledRandomBots(masterPlayer->GetGUID()))
+        return;
+
     for (PlayerBotMap::const_iterator it = GetPlayerBotsBegin(); it != GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
@@ -1594,14 +2017,10 @@ void PlayerbotMgr::HandleMasterOutgoingPacket(WorldPacket const& packet)
             botAI->HandleMasterOutgoingPacket(packet);
     }
 
-    for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin();
-         it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
+    ForEachControlledRandomBot(masterPlayer, [&](Player* /*bot*/, PlayerbotAI* botAI)
     {
-        Player* const bot = it->second;
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (botAI && botAI->GetMaster() == GetMaster())
-            botAI->HandleMasterOutgoingPacket(packet);
-    }
+        botAI->HandleMasterOutgoingPacket(packet);
+    });
 }
 
 void PlayerbotMgr::SaveToDB()
@@ -1612,13 +2031,10 @@ void PlayerbotMgr::SaveToDB()
         bot->SaveToDB(false, false);
     }
 
-    for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin();
-         it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
+    ForEachControlledRandomBot(GetMaster(), [&](Player* bot, PlayerbotAI* /*botAI*/)
     {
-        Player* const bot = it->second;
-        if (GET_PLAYERBOT_AI(bot) && GET_PLAYERBOT_AI(bot)->GetMaster() == GetMaster())
-            bot->SaveToDB(false, false);
-    }
+        bot->SaveToDB(false, false);
+    });
 }
 
 void PlayerbotMgr::OnBotLoginInternal(Player* const bot)
@@ -1788,11 +2204,18 @@ PlayerbotAI* PlayerbotsMgr::GetPlayerbotAI(Player* player)
     {
         return nullptr;
     }
-    // if (player->GetSession()->isLogingOut() || player->IsDuringRemoveFromWorld())
-    // {
-    //     return nullptr;
-    // }
-    auto itr = _playerbotsAIMap.find(player->GetGUID());
+
+    return GetPlayerbotAI(player->GetGUID());
+}
+
+PlayerbotAI* PlayerbotsMgr::GetPlayerbotAI(ObjectGuid const& guid)
+{
+    if (!(sPlayerbotAIConfig.enabled) || guid.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    auto itr = _playerbotsAIMap.find(guid);
     if (itr != _playerbotsAIMap.end())
     {
         if (itr->second->IsBotAI())
@@ -1808,7 +2231,18 @@ PlayerbotMgr* PlayerbotsMgr::GetPlayerbotMgr(Player* player)
     {
         return nullptr;
     }
-    auto itr = _playerbotsMgrMap.find(player->GetGUID());
+
+    return GetPlayerbotMgr(player->GetGUID());
+}
+
+PlayerbotMgr* PlayerbotsMgr::GetPlayerbotMgr(ObjectGuid const& guid)
+{
+    if (!(sPlayerbotAIConfig.enabled) || guid.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    auto itr = _playerbotsMgrMap.find(guid);
     if (itr != _playerbotsMgrMap.end())
     {
         if (!itr->second->IsBotAI())
@@ -1816,6 +2250,27 @@ PlayerbotMgr* PlayerbotsMgr::GetPlayerbotMgr(Player* player)
     }
 
     return nullptr;
+}
+
+void PlayerbotsMgr::LogoutAllPlayerBots()
+{
+    std::vector<PlayerbotMgr*> managers;
+    managers.reserve(_playerbotsMgrMap.size());
+
+    for (auto const& [guid, mgrBase] : _playerbotsMgrMap)
+    {
+        if (!mgrBase || mgrBase->IsBotAI())
+            continue;
+
+        if (PlayerbotMgr* mgr = dynamic_cast<PlayerbotMgr*>(mgrBase))
+            managers.push_back(mgr);
+    }
+
+    for (PlayerbotMgr* mgr : managers)
+    {
+        if (mgr)
+            mgr->LogoutAllBots();
+    }
 }
 
 void PlayerbotMgr::HandleSetSecurityKeyCommand(Player* player, const std::string& key)

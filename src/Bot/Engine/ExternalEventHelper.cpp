@@ -5,13 +5,14 @@
 
 #include "ExternalEventHelper.h"
 
+#include "ChatCommandTrigger.h"
 #include "ChatHelper.h"
 #include "Playerbots.h"
 #include "Trigger.h"
 
-bool ExternalEventHelper::ParseChatCommand(std::string const command, Player* owner)
+bool ExternalEventHelper::ParseChatCommand(std::string const command, Player* owner, uint32 type)
 {
-    if (HandleCommand(command, "", owner))
+    if (HandleCommand(command, "", owner, type))
         return true;
 
     size_t i = std::string::npos;
@@ -26,15 +27,15 @@ bool ExternalEventHelper::ParseChatCommand(std::string const command, Player* ow
 
         i = found - 1;
 
-        if (HandleCommand(name, param, owner))
+        if (HandleCommand(name, param, owner, type))
             return true;
     }
 
     if (!ChatHelper::parseableItem(command))
         return false;
 
-    HandleCommand("c", command, owner);
-    HandleCommand("t", command, owner);
+    HandleCommand("c", command, owner, type);
+    HandleCommand("t", command, owner, type);
 
     return true;
 }
@@ -55,13 +56,16 @@ void ExternalEventHelper::HandlePacket(std::map<uint16, std::string>& handlers, 
     trigger->ExternalEvent(p, owner);
 }
 
-bool ExternalEventHelper::HandleCommand(std::string const name, std::string const param, Player* owner)
+bool ExternalEventHelper::HandleCommand(std::string const name, std::string const param, Player* owner, uint32 type)
 {
     Trigger* trigger = aiObjectContext->GetTrigger(name);
     if (!trigger)
         return false;
 
-    trigger->ExternalEvent(param, owner);
+    if (ChatCommandTrigger* chatTrigger = dynamic_cast<ChatCommandTrigger*>(trigger))
+        chatTrigger->ExternalChatEvent(param, owner, type);
+    else
+        trigger->ExternalEvent(param, owner);
 
     return true;
 }

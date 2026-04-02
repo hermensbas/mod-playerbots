@@ -8,6 +8,7 @@
 
 #include "Action.h"
 
+class Player;
 class PlayerbotAI;
 
 class TellLosAction : public Action
@@ -19,7 +20,7 @@ public:
 
 private:
     void ListUnits(std::string const title, GuidVector units);
-    void ListGameObjects(std::string const title, GuidVector gos);
+    void ListGameObjects(std::string const title, GuidVector gos, Player* owner);
 };
 
 class TellAuraAction : public Action

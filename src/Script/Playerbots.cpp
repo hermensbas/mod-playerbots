@@ -17,12 +17,16 @@
 
 #include "Playerbots.h"
 
+#include "Battleground.h"
 #include "BattlefieldScript.h"
 #include "Channel.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
 #include "DatabaseLoader.h"
 #include "GuildTaskMgr.h"
+#include "ArenaTeam.h"
+#include "ArenaScript.h"
+#include "BattlegroundMgr.h"
 #include "PlayerScript.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotGuildMgr.h"
@@ -31,8 +35,131 @@
 #include "RandomPlayerbotMgr.h"
 #include "ScriptMgr.h"
 #include "PlayerbotCommandScript.h"
+#include "TempArenaTeamMgr.h"
 #include "cmath"
 #include "BattleGroundTactics.h"
+
+namespace
+{
+constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
+
+bool IsWintergraspRestrictedControlledBot(Player* player)
+{
+    if (!player)
+        return false;
+
+    WorldSession* session = player->GetSession();
+    if (!session || !session->IsBot())
+        return false;
+
+    PlayerbotAI* botAI = GET_PLAYERBOT_AI(player);
+    if (!botAI || botAI->IsRealPlayer())
+        return false;
+
+    return botAI->HasRealPlayerMaster() && !botAI->IsAlt();
+}
+
+void RelocateControlledBotFromWintergrasp(Player* player)
+{
+    if (!player || player->GetZoneId() != WINTERGRASP_ZONE_ID)
+        return;
+
+    if (!IsWintergraspRestrictedControlledBot(player))
+        return;
+
+    if (!player->IsInWorld() || player->IsDuringRemoveFromWorld() || player->IsBeingTeleported() ||
+        player->IsBeingTeleportedFar())
+    {
+        return;
+    }
+
+    sRandomPlayerbotMgr.ForceRandomTeleportForLevel(player);
+}
+
+template <class F>
+void ForEachMasterControlledBot(Player* master, F&& fn)
+{
+    if (!master)
+        return;
+
+    if (PlayerbotMgr* playerbotMgr = GET_PLAYERBOT_MGR(master))
+    {
+        for (auto itr = playerbotMgr->GetPlayerBotsBegin(); itr != playerbotMgr->GetPlayerBotsEnd(); ++itr)
+        {
+            Player* bot = itr->second;
+            if (!bot)
+                continue;
+
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+            if (!botAI || botAI->IsRealPlayer() || botAI->GetMaster() != master)
+                continue;
+
+            fn(bot);
+        }
+    }
+
+    static thread_local std::vector<ObjectGuid> tlsControlledGuids;
+
+    std::vector<ObjectGuid> controlledGuids;
+    controlledGuids.swap(tlsControlledGuids);
+    controlledGuids.clear();
+
+    sRandomPlayerbotMgr.GetMasterControlledRandomBotGuidsSnapshot(master->GetGUID(), controlledGuids);
+
+    for (ObjectGuid const& guid : controlledGuids)
+    {
+        Player* bot = sRandomPlayerbotMgr.GetPlayerBot(guid);
+        if (!bot)
+            continue;
+
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (!botAI || botAI->IsRealPlayer() || botAI->GetMaster() != master)
+            continue;
+
+        fn(bot);
+    }
+
+    tlsControlledGuids.swap(controlledGuids);
+}
+
+void LeaveBotsFromMastersBattleground(Player* master, Battleground* bg)
+{
+    if (!master || !bg)
+        return;
+
+    uint32 bgInstanceId = bg->GetInstanceID();
+    BattlegroundTypeId bgTypeId = bg->GetBgTypeID();
+
+    ForEachMasterControlledBot(master, [&](Player* bot)
+    {
+        if (!bot->IsInWorld() || bot->IsBeingTeleported() || bot->IsDuringRemoveFromWorld())
+            return;
+
+        if (!bot->InBattleground() && !bot->InArena() && !bot->GetBattleground())
+            return;
+
+        if (bot->GetBattlegroundId() != bgInstanceId || bot->GetBattlegroundTypeId() != bgTypeId)
+            return;
+
+        bot->LeaveBattleground();
+    });
+}
+
+void CleanupLoggedOutBotFromPlayerbotHolders(Player* player, PlayerbotAI* botAI)
+{
+    if (!player || !botAI)
+        return;
+
+    ObjectGuid const botGuid = player->GetGUID();
+
+    sRandomPlayerbotMgr.OnRandomBotLoggedOut(botGuid);
+
+    if (PlayerbotMgr* playerbotMgr = PlayerbotsMgr::instance().GetPlayerbotMgr(botAI->GetMasterGuid()))
+        playerbotMgr->RemoveFromPlayerbotsMap(botGuid);
+
+    sRandomPlayerbotMgr.RemoveFromPlayerbotsMap(botGuid);
+}
+} // namespace
 
 class PlayerbotsDatabaseScript : public DatabaseScript
 {
@@ -82,14 +209,18 @@ public:
     PlayerbotsPlayerScript() : PlayerScript("PlayerbotsPlayerScript", {
         PLAYERHOOK_ON_LOGIN,
         PLAYERHOOK_ON_AFTER_UPDATE,
+        PLAYERHOOK_ON_UPDATE_ZONE,
         PLAYERHOOK_ON_BEFORE_CRITERIA_PROGRESS,
         PLAYERHOOK_ON_BEFORE_ACHI_COMPLETE,
         PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_GROUP_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_CHANNEL_CHAT,
+        PLAYERHOOK_ON_GET_ARENA_TEAM_ID,
+        PLAYERHOOK_NOT_SET_ARENA_TEAM_INFO_FIELD,
         PLAYERHOOK_ON_GIVE_EXP,
-        PLAYERHOOK_ON_BEFORE_TELEPORT
+        PLAYERHOOK_ON_BEFORE_TELEPORT,
+        PLAYERHOOK_ON_REMOVE_FROM_BATTLEGROUND
     }) {}
 
     void OnPlayerLogin(Player* player) override
@@ -118,6 +249,12 @@ public:
                     "|cff00ff00Playerbots:|r The server is configured with " + maxAllowedBotCount + " bots.");
             }
         }
+    }
+
+    void OnPlayerUpdateZone(Player* player, uint32 newZone, uint32 /*newArea*/) override
+    {
+        if (newZone == WINTERGRASP_ZONE_ID)
+            RelocateControlledBotFromWintergrasp(player);
     }
 
     bool OnPlayerBeforeTeleport(Player* /*player*/, uint32 /*mapid*/, float /*x*/, float /*y*/, float /*z*/,
@@ -168,9 +305,12 @@ public:
 
     void OnPlayerAfterUpdate(Player* player, uint32 diff) override
     {
+        if (player && player->GetZoneId() == WINTERGRASP_ZONE_ID)
+            RelocateControlledBotFromWintergrasp(player);
+
         PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
 
-        if (botAI != nullptr)
+        if (botAI != nullptr && !botAI->IsLogoutQueued())
         {
             botAI->UpdateAI(diff);
         }
@@ -179,6 +319,42 @@ public:
         {
             playerbotMgr->UpdateAI(diff);
         }
+    }
+
+    void OnPlayerRemoveFromBattleground(Player* player, Battleground* bg) override
+    {
+        if (!player || !bg)
+            return;
+
+        if (bg->isArena())
+        {
+            WorldSession* playerSession = player->GetSession();
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(player);
+
+            if (playerSession && playerSession->IsBot() && sRandomPlayerbotMgr.IsRandomBot(player) &&
+                !sRandomPlayerbotMgr.IsAddclassBot(player) && botAI && !botAI->HasRealPlayerMaster())
+            {
+                // Let arena cleanup finish, then use the normal random-bot teleport flow.
+                sRandomPlayerbotMgr.ScheduleTeleport(player->GetGUID().GetCounter(), 5);
+            }
+        }
+
+        WorldSession* session = player->GetSession();
+        if (!session || session->IsBot())
+            return;
+
+        LeaveBotsFromMastersBattleground(player, bg);
+    }
+
+    void OnPlayerGetArenaTeamId(Player* player, uint8 slot, uint32& result) override
+    {
+        if (uint32 tempTeamId = sTempArenaTeamMgr.GetArenaTeamIdForPlayer(player, slot))
+            result = tempTeamId;
+    }
+
+    bool OnPlayerNotSetArenaTeamInfoField(Player* player, uint8 slot, ArenaTeamInfoType /*type*/, uint32 /*value*/) override
+    {
+        return !sTempArenaTeamMgr.ShouldSuppressArenaTeamInfoField(player, slot);
     }
 
     bool OnPlayerCanUseChat(Player* player, uint32 type, uint32 /*lang*/, std::string& msg, Player* receiver) override
@@ -246,7 +422,11 @@ public:
             if (bot->GetGuildId() != player->GetGuildId())
                 continue;
 
-            PlayerbotsMgr::instance().GetPlayerbotAI(bot)->HandleCommand(type, msg, player);
+            PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
+            if (botAI == nullptr)
+                continue;
+
+            botAI->HandleCommand(type, msg, player);
         }
 
         return true;
@@ -380,6 +560,39 @@ public:
     {
         PlayerbotWorldThreadProcessor::instance().Update(diff);
         sRandomPlayerbotMgr.UpdateAI(diff);  // World thread only
+        sTempArenaTeamMgr.Update(diff);
+    }
+};
+
+class PlayerbotsArenaScript : public ArenaScript
+{
+public:
+    PlayerbotsArenaScript() : ArenaScript("PlayerbotsArenaScript", {
+        ARENAHOOK_CAN_SAVE_TO_DB,
+        ARENAHOOK_ON_BEFORE_TEAM_MEMBER_UPDATE,
+        ARENAHOOK_CAN_SAVE_ARENA_STATS_FOR_MEMBER
+    }) {}
+
+    bool CanSaveToDB(ArenaTeam* team) override
+    {
+        if (sTempArenaTeamMgr.IsTempArenaTeam(team))
+            return false;
+
+        return true;
+    }
+
+    bool OnBeforeArenaTeamMemberUpdate(ArenaTeam* team, Player* /*player*/, bool /*won*/, uint32 /*opponentMatchmakerRating*/,
+                                       int32 /*matchmakerChange*/) override
+    {
+        return !sTempArenaTeamMgr.IsTempArenaTeam(team);
+    }
+
+    bool CanSaveArenaStatsForMember(ArenaTeam* team, ObjectGuid /*playerGuid*/) override
+    {
+        if (sTempArenaTeamMgr.IsTempArenaTeam(team))
+            return false;
+
+        return true;
     }
 };
 
@@ -436,18 +649,28 @@ public:
         if (player == nullptr)
             return;
 
-        PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+        if (!packet)
+            return;
 
-        if (botAI != nullptr)
+        if (PlayerbotAI* botAI = GET_PLAYERBOT_AI(player))
+        {
             botAI->HandleBotOutgoingPacket(*packet);
+        }
 
         if (PlayerbotMgr* playerbotMgr = GET_PLAYERBOT_MGR(player))
+        {
+            // If this real player controls no bots (alts or controlled random-bots), skip expensive forwarding.
+            if (playerbotMgr->GetPlayerbotsCount() == 0 && !sRandomPlayerbotMgr.HasMasterControlledRandomBots(player->GetGUID()))
+                return;
             playerbotMgr->HandleMasterOutgoingPacket(*packet);
+        }
     }
 
     void OnPlayerbotUpdate(uint32 diff) override
     {
+        PlayerbotHolder::UpdateInitQueue(diff);
         sRandomPlayerbotMgr.UpdateSessions();  // Per-bot updates only
+        PlayerbotHolder::ProcessPendingSafeLogouts();
     }
 
     void OnPlayerbotUpdateSessions(Player* player) override
@@ -459,10 +682,15 @@ public:
 
     void OnPlayerbotLogout(Player* player) override
     {
+        PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+        if (botAI && !botAI->IsRealPlayer())
+        {
+            CleanupLoggedOutBotFromPlayerbotHolders(player, botAI);
+            return;
+        }
+
         if (PlayerbotMgr* playerbotMgr = GET_PLAYERBOT_MGR(player))
         {
-            PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
-
             if (botAI == nullptr || botAI->IsRealPlayer())
             {
                 playerbotMgr->LogoutAllBots();
@@ -475,7 +703,7 @@ public:
     void OnPlayerbotLogoutBots() override
     {
         LOG_INFO("playerbots", "Logging out all bots...");
-        sRandomPlayerbotMgr.LogoutAllBots();
+        PlayerbotHolder::LogoutAllBotsForShutdown();
     }
 };
 
@@ -513,7 +741,11 @@ public:
         bgStrategies[bg->GetInstanceID()] = data;
     }
 
-    void OnBattlegroundEnd(Battleground* bg, TeamId /*winnerTeam*/) override { bgStrategies.erase(bg->GetInstanceID()); }
+    void OnBattlegroundEnd(Battleground* bg, TeamId /*winnerTeam*/) override
+    {
+        bgStrategies.erase(bg->GetInstanceID());
+        sTempArenaTeamMgr.HandleBattlegroundEnd(bg);
+    }
 };
 
 // Workaround for missing InitEnabledHooksIfNeeded for new BattlefieldScript in ScriptMgr
@@ -532,6 +764,7 @@ void AddPlayerbotsScripts()
     new PlayerbotsBattlefieldScript();
     new PlayerbotsDatabaseScript();
     new PlayerbotsPlayerScript();
+    new PlayerbotsArenaScript();
     new PlayerbotsMiscScript();
     new PlayerbotsServerScript();
     new PlayerbotsWorldScript();
