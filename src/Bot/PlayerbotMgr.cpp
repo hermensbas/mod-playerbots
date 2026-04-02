@@ -50,6 +50,7 @@ constexpr uint32 WINTERGRASP_ZONE_ID = 4197;
 std::mutex pendingSafeLogoutMutex;
 std::unordered_set<ObjectGuid> pendingSafeLogoutGuids;
 std::atomic<bool> hasPendingSafeLogouts{false};
+std::atomic<bool> forceShutdownSafeLogouts{false};
 
 void QueuePendingSafeLogout(ObjectGuid guid)
 {
@@ -62,6 +63,15 @@ void QueuePendingSafeLogout(ObjectGuid guid)
     }
 
     hasPendingSafeLogouts.store(true, std::memory_order_release);
+}
+
+bool HasQueuedPendingSafeLogouts()
+{
+    if (!hasPendingSafeLogouts.load(std::memory_order_acquire))
+        return false;
+
+    std::lock_guard<std::mutex> guard(pendingSafeLogoutMutex);
+    return !pendingSafeLogoutGuids.empty();
 }
 
 template <class F>
@@ -851,7 +861,8 @@ void PlayerbotHolder::ProcessPendingSafeLogouts()
         if (!botAI || !botAI->IsLogoutQueued())
             continue;
 
-        if (IsTrackedByAnyLiveHolder(guid, botAI) && HasConnectedRealMaster(botAI))
+        if (!forceShutdownSafeLogouts.load(std::memory_order_acquire) &&
+            IsTrackedByAnyLiveHolder(guid, botAI) && HasConnectedRealMaster(botAI))
         {
             QueuePendingSafeLogout(guid);
             continue;
@@ -863,6 +874,23 @@ void PlayerbotHolder::ProcessPendingSafeLogouts()
         PlayerbotAI* stillConnectedAI = PlayerbotsMgr::instance().GetPlayerbotAI(guid);
         if (stillConnectedBot && stillConnectedAI && stillConnectedAI->IsLogoutQueued())
             QueuePendingSafeLogout(guid);
+    }
+}
+
+void PlayerbotHolder::LogoutAllBotsForShutdown()
+{
+    forceShutdownSafeLogouts.store(true, std::memory_order_release);
+
+    sPlayerbotsMgr.LogoutAllPlayerBots();
+    sRandomPlayerbotMgr.LogoutAllBots();
+
+    constexpr uint8 maxDrainPasses = 4;
+    for (uint8 pass = 0; pass < maxDrainPasses; ++pass)
+    {
+        if (!HasQueuedPendingSafeLogouts())
+            break;
+
+        ProcessPendingSafeLogouts();
     }
 }
 
@@ -2222,6 +2250,27 @@ PlayerbotMgr* PlayerbotsMgr::GetPlayerbotMgr(ObjectGuid const& guid)
     }
 
     return nullptr;
+}
+
+void PlayerbotsMgr::LogoutAllPlayerBots()
+{
+    std::vector<PlayerbotMgr*> managers;
+    managers.reserve(_playerbotsMgrMap.size());
+
+    for (auto const& [guid, mgrBase] : _playerbotsMgrMap)
+    {
+        if (!mgrBase || mgrBase->IsBotAI())
+            continue;
+
+        if (PlayerbotMgr* mgr = dynamic_cast<PlayerbotMgr*>(mgrBase))
+            managers.push_back(mgr);
+    }
+
+    for (PlayerbotMgr* mgr : managers)
+    {
+        if (mgr)
+            mgr->LogoutAllBots();
+    }
 }
 
 void PlayerbotMgr::HandleSetSecurityKeyCommand(Player* player, const std::string& key)

@@ -30,6 +30,7 @@ public:
 
     static bool RequestSafeBotLogout(ObjectGuid guid);
     static void ProcessPendingSafeLogouts();
+    static void LogoutAllBotsForShutdown();
     void LogoutPlayerBot(ObjectGuid guid);
     void DisablePlayerBot(ObjectGuid guid);
     void RemoveFromPlayerbotsMap(ObjectGuid guid);
@@ -117,6 +118,7 @@ public:
     PlayerbotAI* GetPlayerbotAI(ObjectGuid const& guid);
     PlayerbotMgr* GetPlayerbotMgr(Player* player);
     PlayerbotMgr* GetPlayerbotMgr(ObjectGuid const& guid);
+    void LogoutAllPlayerBots();
 
 private:
     PlayerbotsMgr() = default;

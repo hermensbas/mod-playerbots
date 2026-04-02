@@ -703,7 +703,7 @@ public:
     void OnPlayerbotLogoutBots() override
     {
         LOG_INFO("playerbots", "Logging out all bots...");
-        sRandomPlayerbotMgr.LogoutAllBots();
+        PlayerbotHolder::LogoutAllBotsForShutdown();
     }
 };
 
