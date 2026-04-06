@@ -53,7 +53,7 @@ public:
     PlayerbotsSecureLoginServerScript()
         : ServerScript("PlayerbotsSecureLoginServerScript", { SERVERHOOK_CAN_PACKET_RECEIVE }) {}
 
-    bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
+    bool CanPacketReceive(WorldSession* session, WorldPacket& packet) override
     {
         if (packet.GetOpcode() != CMSG_PLAYER_LOGIN)
             return true;
