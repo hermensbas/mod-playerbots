@@ -170,11 +170,18 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
 
         Event event = basket->getEvent();
         ActionNode* actionNode = queue.Pop();  // NOTE: Pop() deletes basket
+        
+        if (!actionNode)
+            continue;
+            
         Action* action = InitializeAction(actionNode);
 
         if (!action)
         {
             LogAction("A:%s - UNKNOWN", actionNode->getName().c_str());
+            delete actionNode;
+            actionNode = nullptr;
+            continue;
         }
         else if (action->isUseful())
         {
@@ -235,7 +242,8 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
             lastRelevance = relevance;
         }
 
-        delete actionNode;  // Always delete after processing the action node
+        if (actionNode)
+            delete actionNode;  // Delete only if not already deleted
     }
 
     if (time(nullptr) - currentTime > 1)
@@ -546,6 +554,12 @@ bool Engine::ContainsStrategy(StrategyType type)
 
 Action* Engine::InitializeAction(ActionNode* actionNode)
 {
+    if (!actionNode)
+    {
+        LOG_ERROR("playerbots", "InitializeAction: actionNode is nullptr");
+        return nullptr;
+    }
+
     Action* action = actionNode->getAction();
     if (!action)
     {
