@@ -12,6 +12,7 @@
 #include "Queue.h"
 #include "Strategy.h"
 #include "Timer.h"
+#include <memory>
 
 Engine::Engine(PlayerbotAI* botAI, AiObjectContext* factory) : PlayerbotAIAware(botAI), aiObjectContext(factory)
 {
@@ -169,18 +170,19 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
             break;  // Queue is max-relevance; nothing else will meet the minimal threshold.
 
         Event event = basket->getEvent();
-        ActionNode* actionNode = queue.Pop();  // NOTE: Pop() deletes basket
-        
+        std::unique_ptr<ActionNode> actionNode(queue.Pop());  // NOTE: Pop() deletes basket and transfers ownership
+
         if (!actionNode)
+        {
+            LOG_ERROR("playerbots", "Engine::DoNextAction: queue.Pop() returned nullptr after queue.Peek() succeeded");
             continue;
-            
-        Action* action = InitializeAction(actionNode);
+        }
+
+        Action* action = InitializeAction(actionNode.get());
 
         if (!action)
         {
             LogAction("A:%s - UNKNOWN", actionNode->getName().c_str());
-            delete actionNode;
-            actionNode = nullptr;
             continue;
         }
         else if (action->isUseful())
@@ -206,7 +208,7 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
 
                     if (MultiplyAndPush(actionNode->getPrerequisites(), relevance + 0.002f, false, event, "prereq"))
                     {
-                        PushAgain(actionNode, relevance + 0.001f, event);
+                        PushAgain(actionNode.release(), relevance + 0.001f, event);
                         continue;
                     }
                 }
@@ -221,7 +223,6 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
                     LogAction("A:%s - OK", action->getName().c_str());
                     MultiplyAndPush(actionNode->getContinuers(), relevance, false, event, "cont");
                     lastRelevance = relevance;
-                    delete actionNode;  // Safe memory management
                     break;
                 }
                 else
@@ -241,9 +242,6 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
             LogAction("A:%s - USELESS", action->getName().c_str());
             lastRelevance = relevance;
         }
-
-        if (actionNode)
-            delete actionNode;  // Delete only if not already deleted
     }
 
     if (time(nullptr) - currentTime > 1)
