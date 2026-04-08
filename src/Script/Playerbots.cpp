@@ -24,6 +24,7 @@
 #include "DatabaseEnv.h"
 #include "DatabaseLoader.h"
 #include "GuildTaskMgr.h"
+#include "ArenaScript.h"
 #include "PlayerScript.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotGuildMgr.h"
@@ -32,6 +33,7 @@
 #include "RandomPlayerbotMgr.h"
 #include "ScriptMgr.h"
 #include "PlayerbotCommandScript.h"
+#include "TempArenaTeamMgr.h"
 #include "cmath"
 #include "BattleGroundTactics.h"
 
@@ -161,6 +163,8 @@ public:
         PLAYERHOOK_CAN_PLAYER_USE_GROUP_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_CHANNEL_CHAT,
+        PLAYERHOOK_ON_GET_ARENA_TEAM_ID,
+        PLAYERHOOK_NOT_SET_ARENA_TEAM_INFO_FIELD,
         PLAYERHOOK_ON_GIVE_EXP,
         PLAYERHOOK_ON_BEFORE_TELEPORT,
         PLAYERHOOK_ON_REMOVE_FROM_BATTLEGROUND
@@ -264,10 +268,27 @@ public:
             return;
 
         WorldSession* session = player->GetSession();
-        if (!session || session->IsBot())
+        if (!session)
             return;
 
+        if (session->IsBot())
+        {
+            sTempArenaTeamMgr.OnPlayerRemovedFromBattleground(player, bg);
+            return;
+        }
+
         LeaveBotsFromMastersBattleground(player, bg);
+    }
+
+    void OnPlayerGetArenaTeamId(Player* player, uint8 slot, uint32& result) override
+    {
+        if (uint32 tempTeamId = sTempArenaTeamMgr.GetArenaTeamIdForPlayer(player, slot))
+            result = tempTeamId;
+    }
+
+    bool OnPlayerNotSetArenaTeamInfoField(Player* player, uint8 slot, ArenaTeamInfoType /*type*/, uint32 /*value*/) override
+    {
+        return !sTempArenaTeamMgr.ShouldSuppressArenaTeamInfoField(player, slot);
     }
 
     bool OnPlayerCanUseChat(Player* player, uint32 type, uint32 /*lang*/, std::string& msg, Player* receiver) override
@@ -280,9 +301,7 @@ public:
         PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(receiver);
 
         if (botAI == nullptr)
-        {
             return true;
-        }
 
         botAI->HandleCommand(type, msg, player);
 
@@ -473,6 +492,33 @@ public:
     {
         PlayerbotWorldThreadProcessor::instance().Update(diff);
         sRandomPlayerbotMgr.UpdateAI(diff);  // World thread only
+        sTempArenaTeamMgr.Update(diff);
+    }
+};
+
+class PlayerbotsArenaScript : public ArenaScript
+{
+public:
+    PlayerbotsArenaScript() : ArenaScript("PlayerbotsArenaScript", {
+        ARENAHOOK_CAN_SAVE_TO_DB,
+        ARENAHOOK_ON_BEFORE_TEAM_MEMBER_UPDATE,
+        ARENAHOOK_CAN_SAVE_ARENA_STATS_FOR_MEMBER
+    }) {}
+
+    bool CanSaveToDB(ArenaTeam* team) override
+    {
+        return !sTempArenaTeamMgr.IsTempArenaTeam(team);
+    }
+
+    bool OnBeforeArenaTeamMemberUpdate(ArenaTeam* team, Player* /*player*/, bool /*won*/,
+                                       uint32 /*opponentMatchmakerRating*/, int32 /*matchmakerChange*/) override
+    {
+        return !sTempArenaTeamMgr.IsTempArenaTeam(team);
+    }
+
+    bool CanSaveArenaStatsForMember(ArenaTeam* team, ObjectGuid /*playerGuid*/) override
+    {
+        return !sTempArenaTeamMgr.IsTempArenaTeam(team);
     }
 };
 
@@ -615,7 +661,11 @@ public:
         bgStrategies[bg->GetInstanceID()] = data;
     }
 
-    void OnBattlegroundEnd(Battleground* bg, TeamId /*winnerTeam*/) override { bgStrategies.erase(bg->GetInstanceID()); }
+    void OnBattlegroundEnd(Battleground* bg, TeamId /*winnerTeam*/) override
+    {
+        bgStrategies.erase(bg->GetInstanceID());
+        sTempArenaTeamMgr.HandleBattlegroundEnd(bg);
+    }
 };
 
 // Workaround for missing InitEnabledHooksIfNeeded for new BattlefieldScript in ScriptMgr
@@ -637,6 +687,7 @@ void AddPlayerbotsScripts()
     new PlayerbotsMiscScript();
     new PlayerbotsServerScript();
     new PlayerbotsWorldScript();
+    new PlayerbotsArenaScript();
     new PlayerbotsScript();
     new PlayerBotsBGScript();
     AddPlayerbotsSecureLoginScripts();

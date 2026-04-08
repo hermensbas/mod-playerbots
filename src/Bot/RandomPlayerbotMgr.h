@@ -145,6 +145,7 @@ public:
     void RandomTeleportForLevel(Player* bot);
     void RandomTeleportGrindForLevel(Player* bot);
     void RandomTeleportForRpg(Player* bot);
+    bool GetArenaCapitalBankLocation(uint32 level, WorldLocation& loc) const;
     uint32 GetMaxAllowedBotCount();
     bool ProcessBot(Player* player);
     void Revive(Player* player);

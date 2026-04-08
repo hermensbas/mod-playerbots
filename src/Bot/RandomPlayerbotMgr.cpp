@@ -2620,6 +2620,37 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
     }
 }
 
+bool RandomPlayerbotMgr::GetArenaCapitalBankLocation(uint32 level, WorldLocation& loc) const
+{
+    CityId targetCity;
+    if (level == 70)
+        targetCity = CityId::SHATTRATH_CITY;
+    else if (level == 80)
+        targetCity = CityId::DALARAN;
+    else
+        return false;
+
+    auto const cityIt = cityToBankers.find(targetCity);
+    if (cityIt == cityToBankers.end() || cityIt->second.empty())
+        return false;
+
+    std::vector<WorldLocation> locations;
+    locations.reserve(cityIt->second.size());
+
+    for (uint32 bankerEntry : cityIt->second)
+    {
+        auto const locIt = bankerEntryToLocation.find(bankerEntry);
+        if (locIt != bankerEntryToLocation.end())
+            locations.push_back(locIt->second);
+    }
+
+    if (locations.empty())
+        return false;
+
+    loc = locations[urand(0, locations.size() - 1)];
+    return true;
+}
+
 void RandomPlayerbotMgr::RandomTeleportGrindForLevel(Player* bot)
 {
     if (bot->InBattleground())
