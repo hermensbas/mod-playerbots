@@ -552,11 +552,44 @@ public:
             WorldSession* masterSession = sWorldSessionMgr->FindSession(m_masterAccountId);
             Player* masterPlayer = masterSession ? masterSession->GetPlayer() : nullptr;
             if (masterPlayer)
+            {
                 holder = PlayerbotsMgr::instance().GetPlayerbotMgr(masterPlayer);
+            }
+            else
+            {
+                LOG_INFO("playerbots",
+                         "Aborting bot login for {} because master account {} logged out before world-thread attach.",
+                         m_botGuid.ToString(), m_masterAccountId);
+
+                if (WorldSession* botSession = bot->GetSession())
+                {
+                    botSession->LogoutPlayer(true);
+                    bot->SetSession(nullptr);
+                    delete botSession;
+                }
+
+                return false;
+            }
         }
 
         if (!holder)
+        {
+            if (m_masterAccountId)
+            {
+                LOG_INFO("playerbots",
+                         "Aborting bot login for {} because master account {} has no PlayerbotMgr during world-thread attach.",
+                         m_botGuid.ToString(), m_masterAccountId);
+
+                if (WorldSession* botSession = bot->GetSession())
+                {
+                    botSession->LogoutPlayer(true);
+                    bot->SetSession(nullptr);
+                    delete botSession;
+                }
+            }
+
             return false;
+        }
 
         holder->OnBotLogin(bot);
         return true;

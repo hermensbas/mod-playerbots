@@ -597,11 +597,13 @@ public:
     Player* FindNewMaster();
 
     // Checks if the bot is really a player. Players always have themselves as master.
-    bool IsRealPlayer() { return master ? (master == bot) : false; }
+    bool IsRealPlayer() const { return master ? (master == bot) : false; }
     // Bot has a master that is a player.
     bool HasRealPlayerMaster() const;
     // Bot has a master that is activly playing.
     bool HasActivePlayerMaster();
+    // Bot belongs to a non-random account and must remain an alt bot regardless of transient master state.
+    bool IsAccountAltBot() const;
     // Get the group leader or the master of the bot.
     // Checks if the bot is summoned as alt of a player
     bool IsAlt();

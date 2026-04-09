@@ -48,6 +48,8 @@
 #include "PlayerbotMgr.h"
 #include "PlayerbotFactory.h"
 #include "PlayerbotGuildMgr.h"
+#include "PlayerbotOperations.h"
+#include "PlayerbotWorldThreadProcessor.h"
 #include "Playerbots.h"
 #include "PositionValue.h"
 #include "RandomPlayerbotMgr.h"
@@ -1319,6 +1321,11 @@ void PlayerbotAI::UpdateAIGroupMaster()
     if (currentMaster)
         masterBotAI = sPlayerbotsMgr.GetPlayerbotAI(currentMaster->GetGUID());
 
+    // Account-backed alt bots must never switch into fallback/master-reassignment flow.
+    // If the real master is gone or no longer a real player, UpdateAIInternal will force logout.
+    if (IsAccountAltBot() && (!currentMaster || (masterBotAI && !masterBotAI->IsRealPlayer())))
+        return;
+
     if (!currentMaster || (masterBotAI && !masterBotAI->IsRealPlayer()))
     {
         Player* newMaster = FindNewMaster();
@@ -1358,6 +1365,26 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
 
     if (!bot->GetMap())
         return; // instances are created and destroyed on demand
+
+    // Non-random-account bots are always alt bots. They must never continue living
+    // in the world after losing the real-player master, otherwise they can drift
+    // into world-bot behavior and mutate player-owned state.
+    if (IsAccountAltBot() && !HasRealPlayerMaster())
+    {
+        if (MarkLogoutQueued())
+        {
+            LOG_WARN("playerbots", "Forcing logout for alt bot {} because it lost its real-player master.",
+                     bot->GetName().c_str());
+
+            bot->SaveToDB(false, false);
+
+            auto logoutOp = std::make_unique<BotLogoutOperation>(bot->GetGUID());
+            if (!PlayerbotWorldThreadProcessor::instance().QueueOperation(std::move(logoutOp)))
+                ClearLogoutQueued();
+        }
+
+        return;
+    }
 
     PerfMonitorOperation* pmo = nullptr;
     if (sPlayerbotAIConfig.perfMonEnabled)
@@ -5263,7 +5290,19 @@ bool PlayerbotAI::HasActivePlayerMaster()
     return resolvedMaster && !sPlayerbotsMgr.GetPlayerbotAI(resolvedMaster->GetGUID());
 }
 
-bool PlayerbotAI::IsAlt() { return HasRealPlayerMaster() && !sRandomPlayerbotMgr.IsRandomBot(bot); }
+bool PlayerbotAI::IsAccountAltBot() const
+{
+    if (!bot || IsRealPlayer())
+        return false;
+
+    WorldSession* session = bot->GetSession();
+    if (!session || !session->IsBot())
+        return false;
+
+    return !sPlayerbotAIConfig.IsInRandomAccountList(session->GetAccountId());
+}
+
+bool PlayerbotAI::IsAlt() { return IsAccountAltBot(); }
 
 Player* PlayerbotAI::GetGroupLeader()
 {

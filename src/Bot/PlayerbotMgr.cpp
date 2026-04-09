@@ -506,10 +506,19 @@ void PlayerbotHolder::AddPlayerBot(ObjectGuid playerGuid, uint32 masterAccountId
                             return;
                         }
 
+                        LOG_INFO("playerbots",
+                                 "Aborting deferred bot login for {} because master {} has no PlayerbotMgr anymore.",
+                                 holder.GetGuid().ToString(), masterAccountId);
                         PlayerbotHolder::botLoading.erase(holder.GetGuid());
-
                         return;
                     }
+
+                    LOG_INFO("playerbots",
+                             "Aborting deferred bot login for {} because master {} logged out before login completed.",
+                             holder.GetGuid().ToString(), masterAccountId);
+
+                    PlayerbotHolder::botLoading.erase(holder.GetGuid());
+                    return;
                 }
 
                 RandomPlayerbotMgr ::instance().HandlePlayerBotLoginCallback(holder);
