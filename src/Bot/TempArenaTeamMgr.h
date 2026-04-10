@@ -55,6 +55,7 @@ public:
                                ArenaType arenaType) const;
     bool HasTempArenaTeamForLeader(Player* leader, ArenaType arenaType) const;
     bool EnsureGroupReady(Player* leader);
+    bool HasContextForPlayer(Player* player) const;
 
     uint32 GetArenaTeamIdForPlayer(Player* player, uint8 slot) const;
     ArenaTeam* GetArenaTeamForPlayer(Player* player, uint8 slot) const;

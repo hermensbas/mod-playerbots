@@ -1088,7 +1088,7 @@ bool BGLeaveAction::Execute(Event event)
     packet << type << unk2 << (uint32)_bgTypeId << unk << uint8(0);
     session->QueuePacket(new WorldPacket(packet));
 
-    if (isArena && sTempArenaTeamMgr.GetArenaTeamForPlayer(bot, ArenaTeam::GetSlotByType(arenaType)))
+    if (isArena && sTempArenaTeamMgr.HasContextForPlayer(bot))
         sTempArenaTeamMgr.ReleasePlayer(bot);
 
     if (IsRandomBot)

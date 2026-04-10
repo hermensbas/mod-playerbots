@@ -207,6 +207,11 @@ bool TempArenaTeamMgr::EnsureGroupReady(Player* leader)
     return false;
 }
 
+bool TempArenaTeamMgr::HasContextForPlayer(Player* player) const
+{
+    return player && GetContextByPlayer(player->GetGUID()) != nullptr;
+}
+
 uint32 TempArenaTeamMgr::GetArenaTeamIdForPlayer(Player* player, uint8 slot) const
 {
     ArenaTeam* team = GetArenaTeamForPlayer(player, slot);
@@ -642,7 +647,14 @@ bool TempArenaTeamMgr::IsPlayerActiveForContext(Player* player, TempArenaTeamCon
 
     BattlegroundQueueTypeId queueTypeId = BattlegroundQueueTypeId(ctx.queueTypeId);
     if (player->InBattlegroundQueueForBattlegroundQueueType(queueTypeId))
-        return true;
+    {
+        BattlegroundQueue& bgQueue = sBattlegroundMgr->GetBattlegroundQueue(queueTypeId);
+        GroupQueueInfo ginfo;
+        if (!bgQueue.GetPlayerGroupInfoData(player->GetGUID(), &ginfo))
+            return false;
+
+        return ginfo.IsRated && ginfo.ArenaType == ctx.arenaType && ginfo.ArenaTeamId == ctx.teamId;
+    }
 
     Battleground* bg = player->GetBattleground();
     if (!bg || !bg->isArena() || !bg->isRated())
