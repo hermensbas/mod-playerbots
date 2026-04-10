@@ -579,12 +579,16 @@ void PlayerbotHolder::UpdateSessions()
     {
         Player* const bot = itr->second;
         PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (!botAI || botAI->IsLogoutQueued())
+        if (!botAI)
             continue;
 
         if (bot->IsBeingTeleported())
         {
             botAI->HandleTeleportAck();
+        }
+        else if (botAI->IsLogoutQueued())
+        {
+            continue;
         }
         else if (bot->IsInWorld())
         {
