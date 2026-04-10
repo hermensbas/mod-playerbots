@@ -615,7 +615,7 @@ void PlayerbotHolder::HandleBotPackets(WorldSession* session)
     }
 }
 
-void PlayerbotHolder::LogoutAllBots()
+void PlayerbotHolder::LogoutAllBots(bool forceImmediate)
 {
     /*
     while (true)
@@ -641,7 +641,7 @@ void PlayerbotHolder::LogoutAllBots()
         if (!botAI || botAI->IsRealPlayer())
             continue;
 
-        LogoutPlayerBot(bot->GetGUID());
+        LogoutPlayerBot(bot->GetGUID(), forceImmediate);
     }
 }
 
@@ -680,7 +680,7 @@ void PlayerbotMgr::CancelLogout()
     });
 }
 
-void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
+void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid, bool forceImmediate)
 {
     if (Player* bot = GetPlayerBot(guid))
     {
@@ -692,6 +692,12 @@ void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
         WorldSession* botWorldSessionPtr = bot->GetSession();
         if (!botWorldSessionPtr || botWorldSessionPtr->isLogingOut())
             return;
+
+        if (forceImmediate)
+        {
+            ExecuteBotLogoutNow(guid);
+            return;
+        }
 
         if (!botAI->MarkLogoutQueued())
             return;
@@ -2055,6 +2061,27 @@ PlayerbotMgr* PlayerbotsMgr::GetPlayerbotMgr(ObjectGuid const& guid)
     }
 
     return nullptr;
+}
+
+void PlayerbotsMgr::LogoutAllPlayerOwnedBots(bool forceImmediate)
+{
+    std::vector<PlayerbotMgr*> holders;
+    holders.reserve(_playerbotsMgrMap.size());
+
+    for (auto const& entry : _playerbotsMgrMap)
+    {
+        ObjectGuid const& guid = entry.first;
+        PlayerbotAIBase* holder = entry.second;
+
+        if (guid.IsEmpty() || !holder || holder->IsBotAI())
+            continue;
+
+        if (PlayerbotMgr* playerbotMgr = dynamic_cast<PlayerbotMgr*>(holder))
+            holders.push_back(playerbotMgr);
+    }
+
+    for (PlayerbotMgr* holder : holders)
+        holder->LogoutAllBots(forceImmediate);
 }
 
 void PlayerbotMgr::HandleSetSecurityKeyCommand(Player* player, const std::string& key)

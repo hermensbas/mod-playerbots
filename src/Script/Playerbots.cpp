@@ -623,7 +623,13 @@ public:
     void OnPlayerbotLogoutBots() override
     {
         LOG_INFO("playerbots", "Logging out all bots...");
-        sRandomPlayerbotMgr.LogoutAllBots();
+
+        bool const immediateShutdownLogout = sWorld->IsShuttingDown();
+        if (immediateShutdownLogout)
+            LOG_INFO("playerbots", "Shutdown detected: using immediate bot logout path.");
+
+        PlayerbotsMgr::instance().LogoutAllPlayerOwnedBots(immediateShutdownLogout);
+        sRandomPlayerbotMgr.LogoutAllBots(immediateShutdownLogout);
     }
 };
 
