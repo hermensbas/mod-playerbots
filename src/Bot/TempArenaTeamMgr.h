@@ -46,6 +46,16 @@ struct TempArenaStandbySlot
     TeamId nextPreferredTeam = TEAM_ALLIANCE;
 };
 
+struct RetiredTempArenaTeam
+{
+    uint32 teamId = 0;
+    uint8 arenaType = 0;
+    uint32 queueTypeId = 0;
+    uint32 removeAfterMs = 0;
+    ArenaTeam* team = nullptr;
+    std::vector<ObjectGuid> playerGuids;
+};
+
 class TempArenaTeamMgr
 {
 public:
@@ -96,6 +106,9 @@ private:
 
     void Touch(TempArenaTeamContext& ctx, uint32 nowMs);
     void RemoveContext(uint32 teamId, bool disbandGroup, bool scheduleTeleport);
+    void RetireArenaTeam(TempArenaTeamContext const& ctx, uint32 nowMs);
+    void CleanupRetiredArenaTeams(uint32 nowMs);
+    bool IsRetiredTeamStillReferenced(RetiredTempArenaTeam const& retired) const;
     void DisbandTempGroup(TempArenaTeamContext const& ctx);
     void ScheduleWorldReturn(TempArenaTeamContext const& ctx);
     void ApplyQueueHold(TempArenaTeamContext& ctx, uint32 mapId, float x, float y, float z);
@@ -107,6 +120,7 @@ private:
     std::unordered_map<uint32, TempArenaTeamContext> _contextsByTeamId;
     std::unordered_map<ObjectGuid, uint32> _teamIdByLeader;
     std::unordered_map<ObjectGuid, uint32> _teamIdByPlayer;
+    std::unordered_map<uint32, RetiredTempArenaTeam> _retiredTeamsById;
 };
 
 #define sTempArenaTeamMgr TempArenaTeamMgr::instance()

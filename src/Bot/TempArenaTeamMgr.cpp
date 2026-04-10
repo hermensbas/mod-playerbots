@@ -28,6 +28,7 @@ constexpr uint32 TEMP_ARENA_TEAM_UPDATE_MS = 2000;
 constexpr uint32 TEMP_ARENA_BUILD_RETRY_MS = 5000;
 constexpr uint32 TEMP_ARENA_FORMATION_RETRY_MS = 1000;
 constexpr uint32 TEMP_ARENA_POST_RELEASE_TELEPORT_DELAY = 5;
+constexpr uint32 TEMP_ARENA_TEAM_RETIRE_DELAY_MS = 30000;
 
 class TempArenaTeam final : public ArenaTeam
 {
@@ -303,7 +304,8 @@ bool TempArenaTeamMgr::IsTempArenaTeam(ArenaTeam const* team) const
 
 bool TempArenaTeamMgr::IsTempArenaTeamId(uint32 teamId) const
 {
-    return _contextsByTeamId.find(teamId) != _contextsByTeamId.end();
+    return _contextsByTeamId.find(teamId) != _contextsByTeamId.end() ||
+           _retiredTeamsById.find(teamId) != _retiredTeamsById.end();
 }
 
 bool TempArenaTeamMgr::ShouldSuppressArenaTeamInfoField(Player* player, uint8 slot) const
@@ -380,10 +382,12 @@ void TempArenaTeamMgr::HandleBattlegroundEnd(Battleground* bg)
 
 void TempArenaTeamMgr::Update(uint32 /*diff*/)
 {
+    uint32 const nowMs = getMSTime();
+    CleanupRetiredArenaTeams(nowMs);
+
     if (!sPlayerbotAIConfig.randomBotJoinBG)
         return;
 
-    uint32 const nowMs = getMSTime();
     if (_nextUpdateMs && nowMs < _nextUpdateMs)
         return;
 
@@ -801,10 +805,92 @@ void TempArenaTeamMgr::RemoveContext(uint32 teamId, bool disbandGroup, bool sche
         ScheduleWorldReturn(ctx);
 
     if (ctx.team)
+        RetireArenaTeam(ctx, getMSTime());
+}
+
+void TempArenaTeamMgr::RetireArenaTeam(TempArenaTeamContext const& ctx, uint32 nowMs)
+{
+    if (!ctx.team)
+        return;
+
+    RetiredTempArenaTeam retired;
+    retired.teamId = ctx.teamId;
+    retired.arenaType = ctx.arenaType;
+    retired.queueTypeId = ctx.queueTypeId;
+    retired.removeAfterMs = nowMs + TEMP_ARENA_TEAM_RETIRE_DELAY_MS;
+    retired.team = ctx.team;
+    retired.playerGuids.reserve(ctx.memberGuids.size() + 1);
+    retired.playerGuids.push_back(ctx.leaderGuid);
+    retired.playerGuids.insert(retired.playerGuids.end(), ctx.memberGuids.begin(), ctx.memberGuids.end());
+
+    _retiredTeamsById[retired.teamId] = std::move(retired);
+}
+
+void TempArenaTeamMgr::CleanupRetiredArenaTeams(uint32 nowMs)
+{
+    std::vector<uint32> toRemove;
+    toRemove.reserve(_retiredTeamsById.size());
+
+    for (auto const& [teamId, retired] : _retiredTeamsById)
     {
-        sArenaTeamMgr->RemoveArenaTeam(ctx.teamId);
-        delete ctx.team;
+        if (nowMs < retired.removeAfterMs)
+            continue;
+
+        if (IsRetiredTeamStillReferenced(retired))
+            continue;
+
+        toRemove.push_back(teamId);
     }
+
+    for (uint32 teamId : toRemove)
+    {
+        auto itr = _retiredTeamsById.find(teamId);
+        if (itr == _retiredTeamsById.end())
+            continue;
+
+        if (itr->second.team)
+        {
+            sArenaTeamMgr->RemoveArenaTeam(teamId);
+            delete itr->second.team;
+        }
+
+        _retiredTeamsById.erase(itr);
+    }
+}
+
+bool TempArenaTeamMgr::IsRetiredTeamStillReferenced(RetiredTempArenaTeam const& retired) const
+{
+    BattlegroundQueueTypeId queueTypeId = BattlegroundQueueTypeId(retired.queueTypeId);
+    BattlegroundQueue& bgQueue = sBattlegroundMgr->GetBattlegroundQueue(queueTypeId);
+
+    for (ObjectGuid const& playerGuid : retired.playerGuids)
+    {
+        Player* player = ObjectAccessor::FindConnectedPlayer(playerGuid);
+        if (!player)
+            continue;
+
+        if (player->InBattlegroundQueueForBattlegroundQueueType(queueTypeId))
+        {
+            GroupQueueInfo ginfo;
+            if (bgQueue.GetPlayerGroupInfoData(playerGuid, &ginfo) &&
+                ginfo.IsRated && ginfo.ArenaType == retired.arenaType && ginfo.ArenaTeamId == retired.teamId)
+            {
+                return true;
+            }
+        }
+
+        Battleground* bg = player->GetBattleground();
+        if (!bg || !bg->isArena() || !bg->isRated())
+            continue;
+
+        if (bg->GetArenaTeamIdForTeam(TEAM_ALLIANCE) == retired.teamId ||
+            bg->GetArenaTeamIdForTeam(TEAM_HORDE) == retired.teamId)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void TempArenaTeamMgr::DisbandTempGroup(TempArenaTeamContext const& ctx)
