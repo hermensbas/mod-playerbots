@@ -28,7 +28,7 @@ public:
     bool IsAccountLinked(uint32 accountId, uint32 masterAccountId);
     void HandlePlayerBotLoginCallback(PlayerbotLoginQueryHolder const& holder);
 
-    void LogoutPlayerBot(ObjectGuid guid, bool forceImmediate = false);
+    void LogoutPlayerBot(ObjectGuid guid);
     void DisablePlayerBot(ObjectGuid guid);
     void RemoveFromPlayerbotsMap(ObjectGuid guid);
     Player* GetPlayerBot(ObjectGuid guid) const;
@@ -40,7 +40,7 @@ public:
     void UpdateSessions();
     void HandleBotPackets(WorldSession* session);
 
-    void LogoutAllBots(bool forceImmediate = false);
+    void LogoutAllBots();
     void OnBotLogin(Player* const bot);
 
     std::vector<std::string> HandlePlayerbotCommand(char const* args, Player* master = nullptr);
@@ -115,7 +115,6 @@ public:
     PlayerbotAI* GetPlayerbotAI(ObjectGuid const& guid);
     PlayerbotMgr* GetPlayerbotMgr(Player* player);
     PlayerbotMgr* GetPlayerbotMgr(ObjectGuid const& guid);
-    void LogoutAllPlayerOwnedBots(bool forceImmediate = false);
 
 private:
     PlayerbotsMgr() = default;
