@@ -11,6 +11,7 @@
 class ArenaTeam;
 class Battleground;
 class Player;
+struct GroupQueueInfo;
 
 enum ArenaType : uint8;
 enum BattlegroundQueueTypeId : uint8;
@@ -69,6 +70,7 @@ public:
 
     uint32 GetArenaTeamIdForPlayer(Player* player, uint8 slot) const;
     ArenaTeam* GetArenaTeamForPlayer(Player* player, uint8 slot) const;
+    uint32 GetArenaPersonalRatingForPlayer(Player* player, uint8 slot) const;
     ObjectGuid GetBattlemasterGuidForLeader(Player* leader) const;
     void SetBattlemasterGuidForLeader(Player* leader, ObjectGuid const& battlemasterGuid);
     void HoldQueuePositionForLeader(Player* leader, uint32 mapId, float x, float y, float z);
@@ -77,6 +79,7 @@ public:
     bool IsTempArenaTeam(ArenaTeam const* team) const;
     bool IsTempArenaTeamId(uint32 teamId) const;
     bool ShouldSuppressArenaTeamInfoField(Player* player, uint8 slot) const;
+    void OnRatedArenaGroupQueued(GroupQueueInfo* ginfo, BattlegroundBracketId bracketId, Player* leader);
 
     void OnQueueInvite(Player* player);
     void ReleasePlayer(Player* player);

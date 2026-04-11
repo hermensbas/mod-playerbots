@@ -163,6 +163,7 @@ public:
         PLAYERHOOK_CAN_PLAYER_USE_GROUP_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT,
         PLAYERHOOK_CAN_PLAYER_USE_CHANNEL_CHAT,
+        PLAYERHOOK_ON_GET_ARENA_PERSONAL_RATING,
         PLAYERHOOK_ON_GET_ARENA_TEAM_ID,
         PLAYERHOOK_NOT_SET_ARENA_TEAM_INFO_FIELD,
         PLAYERHOOK_ON_GIVE_EXP,
@@ -284,6 +285,12 @@ public:
     {
         if (uint32 tempTeamId = sTempArenaTeamMgr.GetArenaTeamIdForPlayer(player, slot))
             result = tempTeamId;
+    }
+
+    void OnPlayerGetArenaPersonalRating(Player* player, uint8 slot, uint32& result) override
+    {
+        if (uint32 tempRating = sTempArenaTeamMgr.GetArenaPersonalRatingForPlayer(player, slot))
+            result = tempRating;
     }
 
     bool OnPlayerNotSetArenaTeamInfoField(Player* player, uint8 slot, ArenaTeamInfoType /*type*/, uint32 /*value*/) override
@@ -637,6 +644,17 @@ class PlayerBotsBGScript : public BGScript
 {
 public:
     PlayerBotsBGScript() : BGScript("PlayerBotsBGScript") {}
+
+    void OnAddGroup(BattlegroundQueue* /*queue*/, GroupQueueInfo* ginfo, uint32& /*index*/, Player* leader,
+                    Group* /*group*/, BattlegroundTypeId /*bgTypeId*/, PvPDifficultyEntry const* bracketEntry,
+                    uint8 arenaType, bool isRated, bool /*isPremade*/, uint32 /*arenaRating*/,
+                    uint32 /*matchmakerRating*/, uint32 /*arenaTeamId*/, uint32 /*opponentsArenaTeamId*/) override
+    {
+        if (!isRated || !arenaType || !ginfo || !bracketEntry)
+            return;
+
+        sTempArenaTeamMgr.OnRatedArenaGroupQueued(ginfo, bracketEntry->GetBracketId(), leader);
+    }
 
     void OnBattlegroundStart(Battleground* bg) override
     {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <unordered_set>
 
 #include "ArenaTeam.h"
 #include "ArenaTeamMgr.h"
@@ -105,6 +106,90 @@ ArenaTeam* CreateTempArenaTeam(std::vector<Player*> const& players, ArenaType ar
     TempArenaTeam* team = new TempArenaTeam();
     team->Initialize(players, arenaType, BuildTempArenaTeamName(players.front(), arenaType));
     return team;
+}
+
+uint16 ClampArenaRating(int32 rating)
+{
+    if (rating < 0)
+        return 0;
+    if (rating > 2600)
+        return 2600;
+    return uint16(rating);
+}
+
+void ApplyArenaTeamRatingInMemory(ArenaTeam* team, uint16 rating)
+{
+    if (!team)
+        return;
+
+    ArenaTeamStats stats = team->GetStats();
+    stats.Rating = rating;
+    team->SetArenaTeamStats(stats);
+
+    for (auto& m : team->GetMembers())
+    {
+        m.PersonalRating = rating;
+        m.MatchMakerRating = rating;
+        m.MaxMMR = rating;
+    }
+
+    team->NotifyStatsChanged();
+}
+
+uint32 GetQueuedRealPlayersMatchmakerTarget(BattlegroundQueueTypeId queueTypeId, BattlegroundBracketId bracketId,
+                                            ArenaType arenaType)
+{
+    BattlegroundQueue& bgQueue = sBattlegroundMgr->GetBattlegroundQueue(queueTypeId);
+
+    uint64 sum = 0;
+    uint32 count = 0;
+    std::unordered_set<uint32> seenArenaTeams;
+
+    for (auto const& qp : bgQueue.m_QueuedPlayers)
+    {
+        ObjectGuid guid = qp.first;
+        Player* player = ObjectAccessor::FindConnectedPlayer(guid);
+        if (!player || !player->GetSession() || player->GetSession()->IsBot())
+            continue;
+
+        GroupQueueInfo ginfo;
+        if (!bgQueue.GetPlayerGroupInfoData(guid, &ginfo))
+            continue;
+
+        if (!ginfo.IsRated || ginfo.BracketId != uint8(bracketId) || ginfo.ArenaType != uint8(arenaType))
+            continue;
+
+        if (ginfo.ArenaTeamId && !seenArenaTeams.insert(ginfo.ArenaTeamId).second)
+            continue;
+
+        uint32 mmr = ginfo.ArenaMatchmakerRating ? ginfo.ArenaMatchmakerRating : ginfo.ArenaTeamRating;
+        if (!mmr)
+            continue;
+
+        sum += mmr;
+        ++count;
+    }
+
+    return count ? uint32(sum / count) : 0;
+}
+
+uint16 GetStableArenaTargetRating(uint32 teamId, uint32 target)
+{
+    int32 offset = 0;
+    switch (teamId % 3)
+    {
+        case 0:
+            offset = -100;
+            break;
+        case 1:
+            offset = 0;
+            break;
+        default:
+            offset = 100;
+            break;
+    }
+
+    return ClampArenaRating(int32(target) + offset);
 }
 
 void ApplyStay(Player* player, uint32 mapId, float x, float y, float z)
@@ -246,6 +331,18 @@ ArenaTeam* TempArenaTeamMgr::GetArenaTeamForPlayer(Player* player, uint8 slot) c
         return nullptr;
 
     return ctx->team;
+}
+
+uint32 TempArenaTeamMgr::GetArenaPersonalRatingForPlayer(Player* player, uint8 slot) const
+{
+    ArenaTeam* team = GetArenaTeamForPlayer(player, slot);
+    if (!team || !player)
+        return 0;
+
+    if (ArenaTeamMember* member = team->GetMember(player->GetGUID()))
+        return member->PersonalRating;
+
+    return team->GetRating();
 }
 
 ObjectGuid TempArenaTeamMgr::GetBattlemasterGuidForLeader(Player* leader) const
@@ -714,6 +811,80 @@ std::vector<Player*> TempArenaTeamMgr::CollectCandidates(uint32 exactLevel, Team
     }
 
     return players;
+}
+
+void TempArenaTeamMgr::OnRatedArenaGroupQueued(GroupQueueInfo* ginfo, BattlegroundBracketId bracketId, Player* leader)
+{
+    if (!ginfo || !ginfo->IsRated || !ginfo->ArenaType)
+        return;
+
+    BattlegroundQueueTypeId const queueTypeId = BattlegroundMgr::BGQueueTypeId(ginfo->BgTypeId, ginfo->ArenaType);
+    BattlegroundQueue& bgQueue = sBattlegroundMgr->GetBattlegroundQueue(queueTypeId);
+    ArenaType const arenaType = ArenaType(ginfo->ArenaType);
+
+    uint32 target = 0;
+    if (leader && leader->GetSession() && !leader->GetSession()->IsBot())
+        target = ginfo->ArenaMatchmakerRating ? ginfo->ArenaMatchmakerRating : ginfo->ArenaTeamRating;
+
+    if (!target)
+        target = GetQueuedRealPlayersMatchmakerTarget(queueTypeId, bracketId, arenaType);
+
+    if (!target)
+        return;
+
+    for (auto& [teamId, ctx] : _contextsByTeamId)
+    {
+        (void)teamId;
+
+        if (!ctx.team)
+            continue;
+
+        if (ctx.queueTypeId != uint32(queueTypeId) || ctx.bracketId != uint8(bracketId) || ctx.arenaType != uint8(arenaType))
+            continue;
+
+        GroupQueueInfo* queuedGroup = nullptr;
+
+        if (!ginfo->IsInvitedToBGInstanceGUID && ginfo->ArenaType == ctx.arenaType && ginfo->ArenaTeamId == ctx.teamId)
+            queuedGroup = ginfo;
+
+        auto tryResolveQueuedGroup = [&](ObjectGuid const& guid)
+        {
+            if (queuedGroup)
+                return;
+
+            auto itr = bgQueue.m_QueuedPlayers.find(guid);
+            if (itr == bgQueue.m_QueuedPlayers.end() || !itr->second)
+                return;
+
+            GroupQueueInfo* queuedInfo = itr->second;
+            if (!queuedInfo->IsRated || queuedInfo->ArenaType != ctx.arenaType || queuedInfo->ArenaTeamId != ctx.teamId)
+                return;
+
+            if (queuedInfo->IsInvitedToBGInstanceGUID)
+                return;
+
+            queuedGroup = queuedInfo;
+        };
+
+        tryResolveQueuedGroup(ctx.leaderGuid);
+        for (ObjectGuid const& memberGuid : ctx.memberGuids)
+            tryResolveQueuedGroup(memberGuid);
+
+        if (!queuedGroup)
+            continue;
+
+        uint16 desired = GetStableArenaTargetRating(ctx.teamId, target);
+        if (ctx.team->GetRating() == desired &&
+            queuedGroup->ArenaTeamRating == desired &&
+            queuedGroup->ArenaMatchmakerRating == desired)
+        {
+            continue;
+        }
+
+        ApplyArenaTeamRatingInMemory(ctx.team, desired);
+        queuedGroup->ArenaTeamRating = desired;
+        queuedGroup->ArenaMatchmakerRating = desired;
+    }
 }
 
 TempArenaStandbySlot* TempArenaTeamMgr::GetStandbySlotForQueueType(uint32 queueTypeId)

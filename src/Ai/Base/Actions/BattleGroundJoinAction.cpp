@@ -5,7 +5,6 @@
 
 #include "BattleGroundJoinAction.h"
 
-#include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
 #include <limits>
@@ -300,145 +299,6 @@ namespace
                                                      leader->GetPositionY(), leader->GetPositionZ());
         return true;
     }
-
-
-    // For rated arenas we want bot teams to be near the rating/MMR of real players currently queued
-    // for the same bracket and arena type.
-    static uint32 GetQueuedRealPlayersMatchmakerTarget(BattlegroundQueueTypeId queueTypeId, BattlegroundBracketId bracketId,
-                                                       ArenaType arenaType)
-    {
-        // This scan over bgQueue.m_QueuedPlayers can be quite expensive when called frequently
-        // (e.g. 2000 bots evaluating arena queues). Cache for a short TTL to avoid N-times-per-tick work.
-        struct Key
-        {
-            uint32 q = 0;
-            uint8 bracket = 0;
-            uint8 arena = 0;
-
-            bool operator==(Key const& o) const { return q == o.q && bracket == o.bracket && arena == o.arena; }
-        };
-
-        struct KeyHash
-        {
-            size_t operator()(Key const& k) const
-            {
-                // Simple mix: q uses low bits, then bracket/arena.
-                return (size_t(k.q) * 1315423911u) ^ (size_t(k.bracket) << 8) ^ size_t(k.arena);
-            }
-        };
-
-        struct CacheEntry
-        {
-            uint32 target = 0;
-            uint32 tsMs = 0;
-        };
-
-        static std::unordered_map<Key, CacheEntry, KeyHash> s_cache;
-        static uint32 s_lastPruneMs = 0;
-        constexpr uint32 kTtlMs = 1000;
-        constexpr uint32 kPruneEveryMs = 5000;
-        constexpr size_t kMaxEntries = 64;
-
-        uint32 nowMs = getMSTime();
-        Key key{uint32(queueTypeId), uint8(bracketId), uint8(arenaType)};
-
-        auto itCached = s_cache.find(key);
-        if (itCached != s_cache.end() && (nowMs - itCached->second.tsMs) <= kTtlMs)
-            return itCached->second.target;
-
-        BattlegroundQueue& bgQueue = sBattlegroundMgr->GetBattlegroundQueue(queueTypeId);
-
-        uint64 sum = 0;
-        uint32 count = 0;
-        std::unordered_set<uint32> seenArenaTeams;
-
-        for (auto const& qp : bgQueue.m_QueuedPlayers)
-        {
-            ObjectGuid guid = qp.first;
-            Player* player = ObjectAccessor::FindConnectedPlayer(guid);
-            if (!player || !player->GetSession())
-                continue;
-
-            // Only use real players as target source
-            if (player->GetSession()->IsBot())
-                continue;
-
-            GroupQueueInfo ginfo;
-            if (!bgQueue.GetPlayerGroupInfoData(guid, &ginfo))
-                continue;
-
-            if (!ginfo.IsRated)
-                continue;
-
-            if (ginfo.BracketId != uint8(bracketId))
-                continue;
-
-            if (ginfo.ArenaType != uint8(arenaType))
-                continue;
-
-            // De-duplicate by arena team id so a premade group doesn't overweight the average
-            if (ginfo.ArenaTeamId)
-            {
-                if (!seenArenaTeams.insert(ginfo.ArenaTeamId).second)
-                    continue;
-            }
-
-            uint32 mmr = ginfo.ArenaMatchmakerRating ? ginfo.ArenaMatchmakerRating : ginfo.ArenaTeamRating;
-            if (!mmr)
-                continue;
-
-            sum += mmr;
-            ++count;
-        }
-
-        uint32 target = count ? uint32(sum / count) : 0;
-
-        s_cache[key] = CacheEntry{target, nowMs};
-
-        // Opportunistic prune to keep the cache tiny.
-        if (s_cache.size() > kMaxEntries && (nowMs - s_lastPruneMs) > kPruneEveryMs)
-        {
-            s_lastPruneMs = nowMs;
-            for (auto it = s_cache.begin(); it != s_cache.end();)
-            {
-                if ((nowMs - it->second.tsMs) > kPruneEveryMs)
-                    it = s_cache.erase(it);
-                else
-                    ++it;
-            }
-        }
-
-        return target;
-    }
-
-    static uint16 ClampArenaRating(int32 rating)
-    {
-        if (rating < 0)
-            return 0;
-        if (rating > 2600)
-            return 2600;
-        return uint16(rating);
-    }
-
-    static void ApplyArenaTeamRatingInMemory(ArenaTeam* team, uint16 rating)
-    {
-        if (!team)
-            return;
-
-        ArenaTeamStats stats = team->GetStats();
-        stats.Rating = rating;
-        team->SetArenaTeamStats(stats);
-
-        for (auto& m : team->GetMembers())
-        {
-            m.PersonalRating = rating;
-            m.MatchMakerRating = rating;
-            m.MaxMMR = rating;
-        }
-
-        team->NotifyStatsChanged();
-    }
-
 
 } // namespace
 
@@ -908,26 +768,6 @@ bool BGJoinAction::JoinQueue(uint32 type)
     else
     {
         WorldSession* session = GetBotSession();
-
-        if (isRated && tempArenaTeam)
-        {
-            uint32 target = GetQueuedRealPlayersMatchmakerTarget(queueTypeId, bracketId, arenaType);
-            if (target)
-            {
-                uint16 desired = ClampArenaRating(int32(target) + irand(-100, 100));
-                ApplyArenaTeamRatingInMemory(tempArenaTeam, desired);
-            }
-        }
-        else if (isRated && sRandomPlayerbotMgr.IsRandomBot(bot) && !sRandomPlayerbotMgr.IsAddclassBot(bot))
-        {
-            uint32 target = GetQueuedRealPlayersMatchmakerTarget(queueTypeId, bracketId, arenaType);
-            if (target)
-            {
-                uint16 desired = ClampArenaRating(int32(target) + irand(-100, 100));
-                if (ArenaTeam* team = sArenaTeamMgr->GetArenaTeamByCaptain(bot->GetGUID(), arenaType))
-                    ApplyArenaTeamRatingInMemory(team, desired);
-            }
-        }
 
         WorldPacket arena_packet(CMSG_BATTLEMASTER_JOIN_ARENA, 20);
         arena_packet << unit->GetGUID() << arenaslot << asGroup << uint8(isRated);
