@@ -13,6 +13,9 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <ctime>
+#include <mutex>
+#include <unordered_map>
 
 
 static bool TryParseLosIndex(std::string const& text, uint32& outIndex)
@@ -48,8 +51,48 @@ static bool TryParseLosIndex(std::string const& text, uint32& outIndex)
     return true;
 }
 
+namespace
+{
+constexpr time_t USE_CHAT_COMMAND_COOLDOWN_SEC = 5;
+
+std::unordered_map<ObjectGuid, time_t> s_useChatCommandCooldowns;
+std::mutex s_useChatCommandCooldownsMutex;
+
+bool CheckAndStartUseChatCommandCooldown(PlayerbotAI* botAI, Event& event)
+{
+    if (!botAI || !botAI->GetBot())
+        return true;
+
+    // Only throttle the explicit chat command "use" / "u".
+    if (event.GetSource() != "use")
+        return true;
+
+    time_t now = time(nullptr);
+    ObjectGuid const botGuid = botAI->GetBot()->GetGUID();
+
+    std::lock_guard<std::mutex> lock(s_useChatCommandCooldownsMutex);
+
+    auto const it = s_useChatCommandCooldowns.find(botGuid);
+    if (it != s_useChatCommandCooldowns.end())
+    {
+        time_t const elapsed = now - it->second;
+        if (elapsed >= 0 && elapsed < USE_CHAT_COMMAND_COOLDOWN_SEC)
+        {
+            botAI->TellError("Use command is on cooldown. Wait 5 seconds.");
+            return false;
+        }
+    }
+
+    s_useChatCommandCooldowns[botGuid] = now;
+    return true;
+}
+} // namespace
+
 bool UseItemAction::Execute(Event event)
 {
+    if (!CheckAndStartUseChatCommandCooldown(botAI, event))
+        return false;
+
     std::string name = event.getParam();
     if (name.empty())
         name = getName();
