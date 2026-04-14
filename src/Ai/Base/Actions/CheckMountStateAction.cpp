@@ -223,11 +223,7 @@ bool CheckMountStateAction::Mount()
 
 void CheckMountStateAction::Dismount()
 {
-    if (bot->isMoving())
-        bot->StopMoving();
-
-    WorldPacket emptyPacket;
-    bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+    botAI->DismountBot();
 }
 
 bool CheckMountStateAction::TryForms(Player* master, int32 masterMountType, int32 masterSpeed) const

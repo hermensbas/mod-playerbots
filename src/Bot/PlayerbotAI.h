@@ -535,6 +535,8 @@ public:
     void SpellInterrupted(uint32 spellid);
     int32 CalculateGlobalCooldown(uint32 spellid);
     void InterruptSpell();
+    void DismountBot();
+    void SyncWithOnFootState();
     void RemoveAura(std::string const name);
     void RemoveShapeshift();
     void WaitForSpellCast(Spell* spell);

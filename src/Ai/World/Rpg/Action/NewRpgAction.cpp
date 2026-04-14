@@ -442,7 +442,7 @@ bool NewRpgTravelFlightAction::Execute(Event /*event*/)
 
     botAI->RemoveShapeshift();
     if (bot->IsMounted())
-        bot->Dismount();
+        botAI->DismountBot();
 
     if (!bot->ActivateTaxiPathTo(nodes, flightMaster, 0))
     {

@@ -156,8 +156,7 @@ bool RpgTaxiAction::Execute(Event /*event*/)
 
     GuidPosition guidP = rpg->guidP();
 
-    WorldPacket emptyPacket;
-    session->HandleCancelMountAuraOpcode(emptyPacket);
+    botAI->DismountBot();
 
     uint32 node =
         sObjectMgr->GetNearestTaxiNode(guidP.GetPositionX(), guidP.GetPositionY(), guidP.GetPositionZ(), guidP.GetMapId(), bot->GetTeamId());

@@ -139,6 +139,27 @@ SpellInterruptMeta GetSpellInterruptMeta(SpellInfo const* spellInfo)
     cache.emplace(spellInfo->Id, meta);
     return meta;
 }
+
+void SyncBotWithOnFootState(Player* bot)
+{
+    if (!bot || !bot->IsInWorld())
+        return;
+
+    if (!bot->IsFlying() && !bot->HasUnitState(UNIT_STATE_IN_FLIGHT) &&
+        !bot->HasUnitMovementFlag(MOVEMENTFLAG_FLYING) &&
+        !bot->HasUnitMovementFlag(MOVEMENTFLAG_DISABLE_GRAVITY))
+        return;
+
+    if (bot->IsMounted() || bot->GetVehicle() || bot->HasUnitFlag(UNIT_FLAG_TAXI_FLIGHT) || bot->IsInFlight() ||
+        bot->HasIncreaseMountedFlightSpeedAura() || bot->HasFlyAura() || bot->HasAuraType(SPELL_AURA_HOVER))
+        return;
+
+    bot->ClearUnitState(UNIT_STATE_IN_FLIGHT);
+    bot->RemoveUnitMovementFlag(MOVEMENTFLAG_CAN_FLY);
+    bot->RemoveUnitMovementFlag(MOVEMENTFLAG_DISABLE_GRAVITY);
+    bot->RemoveUnitMovementFlag(MOVEMENTFLAG_FLYING);
+    bot->SendMovementFlagUpdate();
+}
 } // namespace
 
 
@@ -2439,6 +2460,24 @@ void PlayerbotAI::DoNextAction(bool min)
         bot->RemoveAurasByType(SPELL_AURA_MOD_INCREASE_MOUNTED_FLIGHT_SPEED);
     }
 }
+
+void PlayerbotAI::DismountBot()
+{
+    if (bot->isMoving())
+        bot->StopMoving();
+
+    if (bot->IsMounted())
+    {
+        WorldPacket emptyPacket;
+        bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+    }
+    else if (bot->GetMountID())
+        bot->Dismount();
+
+    SyncBotWithOnFootState(bot);
+}
+
+void PlayerbotAI::SyncWithOnFootState() { SyncBotWithOnFootState(bot); }
 
 void PlayerbotAI::ReInitCurrentEngine()
 {

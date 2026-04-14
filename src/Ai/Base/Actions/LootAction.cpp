@@ -94,7 +94,7 @@ bool OpenLootAction::DoLoot(LootObject& lootObject)
     // Dismount if the bot is mounted
     if (bot->IsMounted())
     {
-        bot->Dismount();
+        botAI->DismountBot();
         botAI->SetNextCheckDelay(sPlayerbotAIConfig.lootDelay); // Small delay to avoid animation issues
     }
 

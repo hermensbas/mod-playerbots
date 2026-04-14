@@ -1185,9 +1185,8 @@ bool BGStatusAction::Execute(Event event)
                     LOG_INFO("playerbots", "Bot {} {}:{} <{}>: Force join {} {}", bot->GetGUID().ToString().c_str(),
                              bot->GetTeamId() == TEAM_ALLIANCE ? "A" : "H", bot->GetLevel(), bot->GetName(),
                              isArena ? "Arena" : "BG", _bgType);
-                    WorldPacket emptyPacket;
                     WorldSession* session = GetBotSession();
-                    session->HandleCancelMountAuraOpcode(emptyPacket);
+                    botAI->DismountBot();
                     action = 0x1;
 
                     WorldPacket packet(CMSG_BATTLEFIELD_PORT, 20);
@@ -1328,9 +1327,8 @@ bool BGStatusAction::Execute(Event event)
                  bot->GetTeamId() == TEAM_ALLIANCE ? "A" : "H", bot->GetLevel(), bot->GetName(),
                  isArena ? "Arena" : "BG", _bgType);
 
-        WorldPacket emptyPacket;
         WorldSession* session = GetBotSession();
-        session->HandleCancelMountAuraOpcode(emptyPacket);
+        botAI->DismountBot();
 
         action = 0x1;
 

@@ -230,8 +230,7 @@ bool ToCMountAction::EnterVehicle(Unit* vehicleBase, bool moveIfFar)
         return false;
 
     // dismount because bots can enter vehicle on mount
-    WorldPacket emptyPacket;
-    bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+    botAI->DismountBot();
     return true;
 }
 
