@@ -5396,7 +5396,14 @@ bool IccValithriaPortalAction::Execute(Event /*event*/)
         for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
         {
             Player* member = itr->GetSource();
-            if (member && member->IsAlive() && botAI->IsHeal(member))
+            if (!member || !member->IsAlive())
+                continue;
+
+            PlayerbotAI* memberBotAI = GET_PLAYERBOT_AI(member);
+            if (!memberBotAI || memberBotAI->IsRealPlayer())
+                continue;
+
+            if (botAI->IsHeal(member))
                 healers.push_back(member);
         }
         std::sort(healers.begin(), healers.end(), [](Player* a, Player* b) { return a->GetGUID() < b->GetGUID(); });
@@ -5645,7 +5652,7 @@ bool IccValithriaDreamCloudAction::Execute(Event /*event*/)
 
     // All stacked: leader (lowest guid) moves to next cloud, others follow and stack at leader's new position
     // Find all dream and nightmare clouds
-    GuidVector npcs = AI_VALUE(GuidVector, "nearest hostile npcs");
+    GuidVector npcs = AI_VALUE(GuidVector, "nearest npcs");
     std::vector<Creature*> dreamClouds;
     std::vector<Creature*> nightmareClouds;
 
