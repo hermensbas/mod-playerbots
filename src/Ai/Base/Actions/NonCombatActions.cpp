@@ -8,8 +8,35 @@
 #include "Event.h"
 #include "Playerbots.h"
 
+namespace
+{
+bool CanStartRefreshment(Player* bot, PlayerbotAI* botAI)
+{
+    if (!bot || !botAI)
+        return false;
+
+    if (bot->IsInCombat() || bot->IsMounted() || bot->IsBeingTeleported() || bot->HasSpiritOfRedemptionAura())
+        return false;
+
+    // Hard crowd control must never allow food/drink to start, even when the
+    // combat flag drops for a moment in arena/PvP.
+    if (bot->HasUnitState(UNIT_STATE_LOST_CONTROL) || bot->HasConfuseAura() || bot->HasStunAura() ||
+        bot->HasFearAura() || bot->IsCharmed() || bot->IsPolymorphed())
+        return false;
+
+    if (botAI->HasAnyAuraOf(bot, "dire bear form", "bear form", "cat form", "travel form", "aquatic form",
+                            "flight form", "swift flight form", nullptr))
+        return false;
+
+    return true;
+}
+} // namespace
+
 bool DrinkAction::Execute(Event event)
 {
+    if (!CanStartRefreshment(bot, botAI))
+        return false;
+
     if (botAI->HasCheat(BotCheatMask::food))
     {
         // if (bot->IsNonMeleeSpellCast(true))
@@ -55,14 +82,15 @@ bool DrinkAction::isUseful()
 
 bool DrinkAction::isPossible()
 {
-    return !bot->IsInCombat() && !bot->IsMounted() &&
-           !botAI->HasAnyAuraOf(GetTarget(), "dire bear form", "bear form", "cat form", "travel form", "aquatic form",
-                                "flight form", "swift flight form", nullptr) &&
+    return CanStartRefreshment(bot, botAI) &&
            (botAI->HasCheat(BotCheatMask::food) || UseItemAction::isPossible());
 }
 
 bool EatAction::Execute(Event event)
 {
+    if (!CanStartRefreshment(bot, botAI))
+        return false;
+
     if (botAI->HasCheat(BotCheatMask::food))
     {
         // if (bot->IsNonMeleeSpellCast(true))
@@ -104,8 +132,6 @@ bool EatAction::isUseful() { return UseItemAction::isUseful() && AI_VALUE2(uint8
 
 bool EatAction::isPossible()
 {
-    return !bot->IsInCombat() && !bot->IsMounted() &&
-           !botAI->HasAnyAuraOf(GetTarget(), "dire bear form", "bear form", "cat form", "travel form", "aquatic form",
-                                "flight form", "swift flight form", nullptr) &&
+    return CanStartRefreshment(bot, botAI) &&
            (botAI->HasCheat(BotCheatMask::food) || UseItemAction::isPossible());
 }
