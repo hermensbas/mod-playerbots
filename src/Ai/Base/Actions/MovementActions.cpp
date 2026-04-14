@@ -937,6 +937,7 @@ bool MovementAction::Follow(Unit* target, float distance) { return Follow(target
 
 void MovementAction::UpdateMovementState()
 {
+    constexpr uint32 SPELL_DREAM_STATE = 70766;
     const bool isCurrentlyRestricted =  // see if the bot is currently slowed, rooted, or otherwise unable to move
         bot->HasUnitState(UNIT_STATE_LOST_CONTROL) || bot->IsRooted() || bot->isFrozen() || bot->IsPolymorphed();
 
@@ -948,10 +949,11 @@ void MovementAction::UpdateMovementState()
         const auto liquidState = bot->GetLiquidData().Status;
         const float gZ = bot->GetMapWaterOrGroundLevel(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ());
         const bool onGroundZ = bot->GetPositionZ() < gZ + 1.f;
+        const bool isDreamState = bot->HasAura(SPELL_DREAM_STATE);
         const bool canSwim = liquidState == LIQUID_MAP_IN_WATER || liquidState == LIQUID_MAP_UNDER_WATER;
-        const bool canFly = bot->HasIncreaseMountedFlightSpeedAura() || bot->HasFlyAura();
+        const bool canFly = bot->HasIncreaseMountedFlightSpeedAura() || bot->HasFlyAura() || isDreamState;
         const bool canWaterWalk = bot->HasWaterWalkAura();
-        const bool isMasterFlying = master ? master->HasUnitMovementFlag(MOVEMENTFLAG_FLYING) : true;
+        const bool isMasterFlying = isDreamState ? true : (master ? master->HasUnitMovementFlag(MOVEMENTFLAG_FLYING) : true);
         const bool isMasterSwimming = master ? master->HasUnitMovementFlag(MOVEMENTFLAG_SWIMMING) : true;
         const bool isFlying = bot->HasUnitMovementFlag(MOVEMENTFLAG_FLYING);
         const bool isSwimming = bot->HasUnitMovementFlag(MOVEMENTFLAG_SWIMMING);

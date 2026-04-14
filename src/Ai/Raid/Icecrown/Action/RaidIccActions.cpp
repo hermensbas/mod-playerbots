@@ -7,6 +7,7 @@
 #include "GenericSpellActions.h"
 #include "GenericActions.h"
 #include <fstream>
+#include <limits>
 #include <unordered_map>
 #include "RaidIccTriggers.h"
 #include "Multiplier.h"
@@ -954,8 +955,7 @@ bool IccGunshipEnterCannonAction::EnterVehicle(Unit* vehicleBase, bool moveIfFar
         return false;
 
     // Dismount because bots can enter vehicle while mounted
-    WorldPacket emptyPacket;
-    bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+    botAI->DismountBot();
 
     return true;
 }
@@ -4915,8 +4915,7 @@ bool IccValkyreSpearAction::Execute(Event /*event*/)
     spear->HandleSpellClick(bot);
 
     // Dismount if mounted
-    WorldPacket emptyPacket;
-    bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+    botAI->DismountBot();
 
     return false;
 }
@@ -5509,6 +5508,7 @@ bool IccValithriaHealAction::Execute(Event /*event*/)
         bot->SetSpeed(MOVE_RUN, NORMAL_SPEED, true);
         bot->SetSpeed(MOVE_WALK, NORMAL_SPEED, true);
         bot->SetSpeed(MOVE_FLIGHT, NORMAL_SPEED, true);
+        botAI->SyncWithOnFootState();
     }
 
     // Enforce Z-position limit
@@ -5597,15 +5597,20 @@ bool IccValithriaDreamCloudAction::Execute(Event /*event*/)
     bot->SetSpeed(MOVE_WALK, 2.0f, true);
     bot->SetSpeed(MOVE_FLIGHT, 2.0f, true);
 
-    // Gather all group members with dream state
+    // Gather all bot group members with dream state so the portal coordination does not depend on real players.
     const GuidVector members = AI_VALUE(GuidVector, "group members");
     std::vector<Unit*> dreamBots;
     for (auto const& guid : members)
     {
         Unit* member = botAI->GetUnit(guid);
-        if (member && member->IsAlive() && member->HasAura(SPELL_DREAM_STATE))
+        Player* player = member ? member->ToPlayer() : nullptr;
+        PlayerbotAI* memberBotAI = player ? GET_PLAYERBOT_AI(player) : nullptr;
+        if (memberBotAI && !memberBotAI->IsRealPlayer() && member->IsAlive() && member->HasAura(SPELL_DREAM_STATE))
             dreamBots.push_back(member);
     }
+
+    if (std::find(dreamBots.begin(), dreamBots.end(), bot) == dreamBots.end() && bot->HasAura(SPELL_DREAM_STATE))
+        dreamBots.push_back(bot);
 
     if (dreamBots.empty())
         return false;
@@ -5617,41 +5622,35 @@ bool IccValithriaDreamCloudAction::Execute(Event /*event*/)
     auto it = std::find(dreamBots.begin(), dreamBots.end(), bot);
     if (it == dreamBots.end())
         return false;
+    size_t myIndex = std::distance(dreamBots.begin(), it);
 
-    // Check if all dream bots are stacked within 3f of the current leader (lowest guid)
-    constexpr float STACK_RADIUS = 2.0f;
+    // Regroup loosely when entering the dream so bots start from roughly the same area without teleporting.
+    constexpr float STACK_RADIUS = 5.0f;
     Unit* leader = dreamBots.front();
     bool allStacked = true;
     for (Unit* member : dreamBots)
     {
-        // Only require stacking for bots, not real players
-        Player* player = member->ToPlayer();
-        if (player && !player->GetSession())  // is a bot
+        if (member->GetExactDist2d(leader) > STACK_RADIUS)
         {
-            if (member->GetDistance(leader) > STACK_RADIUS)
-            {
-                allStacked = false;
-                break;
-            }
+            allStacked = false;
+            break;
         }
     }
 
-    // If not all stacked, everyone moves to the leader's position (clouds' position)
-    constexpr float PORTALSTART_TOLERANCE = 1.0f;
+    constexpr float PORTALSTART_TOLERANCE = 5.0f;
     if (!allStacked)
     {
         if (bot != leader)
         {
-            if (bot->GetDistance(leader) > PORTALSTART_TOLERANCE)
-            {
-                bot->TeleportTo(bot->GetMapId(), leader->GetPositionX(), leader->GetPositionY(), leader->GetPositionZ(),
-                                bot->GetOrientation());
-            }
+            if (bot->GetExactDist2d(leader) > PORTALSTART_TOLERANCE)
+                return MoveTo(bot->GetMapId(), leader->GetPositionX(), leader->GetPositionY(), leader->GetPositionZ(),
+                              false, false, false, true, MovementPriority::MOVEMENT_NORMAL);
         }
+
+        return true;
     }
 
-    // All stacked: leader (lowest guid) moves to next cloud, others follow and stack at leader's new position
-    // Find all dream and nightmare clouds
+    // Once regrouped, every bot takes its own cloud slot instead of hard-following the leader.
     GuidVector npcs = AI_VALUE(GuidVector, "nearest npcs");
     std::vector<Creature*> dreamClouds;
     std::vector<Creature*> nightmareClouds;
@@ -5671,198 +5670,106 @@ bool IccValithriaDreamCloudAction::Execute(Event /*event*/)
         }
     }
 
-    // Sort clouds by distance
+    // Use a shared ordering so every bot sees the same cloud list and can claim its own lane.
     std::sort(dreamClouds.begin(), dreamClouds.end(),
-              [this](Creature* a, Creature* b) { return bot->GetExactDist2d(a) < bot->GetExactDist2d(b); });
+              [leader](Creature* a, Creature* b)
+              {
+                  float distA = leader->GetExactDist2d(a);
+                  float distB = leader->GetExactDist2d(b);
+                  if (distA != distB)
+                      return distA < distB;
+
+                  return a->GetGUID() < b->GetGUID();
+              });
 
     std::sort(nightmareClouds.begin(), nightmareClouds.end(),
-              [this](Creature* a, Creature* b) { return bot->GetExactDist2d(a) < bot->GetExactDist2d(b); });
+              [leader](Creature* a, Creature* b)
+              {
+                  float distA = leader->GetExactDist2d(a);
+                  float distB = leader->GetExactDist2d(b);
+                  if (distA != distB)
+                      return distA < distB;
 
-    // Only the leader moves to the next cloud
-    if (bot == leader)
+                  return a->GetGUID() < b->GetGUID();
+              });
+
+    constexpr float CLOUD_TRIGGER_RADIUS = 5.0f;
+    auto isAtCloud = [this, CLOUD_TRIGGER_RADIUS](Creature* cloud)
+    { return cloud && bot->GetExactDist2d(cloud) <= CLOUD_TRIGGER_RADIUS; };
+
+    auto selectCloud = [this, myIndex, CLOUD_TRIGGER_RADIUS, &dreamBots](const std::vector<Creature*>& clouds) -> Creature*
     {
-        // Use GUID to determine which cloud type to prefer
-        bool preferDream = (bot->GetGUID().GetCounter() % 2 == 0);
+        if (clouds.empty())
+            return nullptr;
 
-        // Check if we're close to any cloud
-        bool atDreamCloud = false;
-        bool atNightmareCloud = false;
-
-        for (Creature* cloud : dreamClouds)
+        size_t botCount = std::max<size_t>(1, dreamBots.size());
+        size_t startIndex = myIndex % clouds.size();
+        for (size_t offset = 0; offset < clouds.size(); ++offset)
         {
-            if (bot->GetExactDist2d(cloud) <= 2.0f)
+            size_t cloudIndex = (startIndex + offset * botCount) % clouds.size();
+            Creature* cloud = clouds[cloudIndex];
+            if (cloud && bot->GetExactDist2d(cloud) > CLOUD_TRIGGER_RADIUS)
+                return cloud;
+        }
+
+        return nullptr;
+    };
+
+    auto findNearestAvailableCloud = [this, CLOUD_TRIGGER_RADIUS](const std::vector<Creature*>& clouds) -> Creature*
+    {
+        Creature* bestCloud = nullptr;
+        float bestDistance = std::numeric_limits<float>::max();
+
+        for (Creature* cloud : clouds)
+        {
+            if (!cloud)
+                continue;
+
+            float distance = bot->GetExactDist2d(cloud);
+            if (distance <= CLOUD_TRIGGER_RADIUS)
+                continue;
+
+            if (distance < bestDistance)
             {
-                atDreamCloud = true;
-                break;
+                bestDistance = distance;
+                bestCloud = cloud;
             }
         }
 
-        for (Creature* cloud : nightmareClouds)
-        {
-            if (bot->GetExactDist2d(cloud) <= 2.0f)
-            {
-                atNightmareCloud = true;
-                break;
-            }
-        }
+        return bestCloud;
+    };
 
-        // If we have emerald vigor, prioritize dream clouds
-        if (bot->HasAura(SPELL_EMERALD_VIGOR))
-        {
-            // If at dream cloud, move to 2nd closest dream cloud or closest nightmare cloud
-            if (atDreamCloud)
-            {
-                Creature* targetCloud = nullptr;
-                // Try 2nd closest dream cloud first
-                if (dreamClouds.size() >= 2 && bot->GetExactDist2d(dreamClouds[1]) > 2.0f)
-                    targetCloud = dreamClouds[1];
-                // Otherwise move to closest nightmare cloud
-                else if (!nightmareClouds.empty() && bot->GetExactDist2d(nightmareClouds[0]) > 2.0f)
-                    targetCloud = nightmareClouds[0];
+    bool preferDream = bot->HasAura(SPELL_EMERALD_VIGOR) || (myIndex % 2 == 0);
+    Creature* nearestDreamCloud = findNearestAvailableCloud(dreamClouds);
+    Creature* nearestNightmareCloud = findNearestAvailableCloud(nightmareClouds);
 
-                if (targetCloud)
-                    MoveTo(targetCloud->GetMapId(), targetCloud->GetPositionX(), targetCloud->GetPositionY(),
-                           targetCloud->GetPositionZ(), false, false, false, true, MovementPriority::MOVEMENT_NORMAL);
-            }
-            // If at nightmare cloud, move to closest dream cloud or 2nd closest nightmare cloud
-            else if (atNightmareCloud)
-            {
-                Creature* targetCloud = nullptr;
-                // Try closest dream cloud first
-                if (!dreamClouds.empty() && bot->GetExactDist2d(dreamClouds[0]) > 2.0f)
-                    targetCloud = dreamClouds[0];
-                // Otherwise move to 2nd closest nightmare cloud
-                else if (nightmareClouds.size() >= 2 && bot->GetExactDist2d(nightmareClouds[1]) > 2.0f)
-                    targetCloud = nightmareClouds[1];
+    Creature* targetCloud = nullptr;
+    if (preferDream)
+    {
+        targetCloud = selectCloud(dreamClouds);
+        if (!targetCloud && !isAtCloud(nearestDreamCloud))
+            targetCloud = nearestDreamCloud;
 
-                if (targetCloud)
-                    MoveTo(targetCloud->GetMapId(), targetCloud->GetPositionX(), targetCloud->GetPositionY(),
-                           targetCloud->GetPositionZ(), false, false, false, true, MovementPriority::MOVEMENT_NORMAL);
-            }
-            // If not at any cloud, move to closest dream cloud or nightmare cloud
-            else
-            {
-                if (!dreamClouds.empty() && bot->GetExactDist2d(dreamClouds[0]) > 2.0f)
-                    MoveTo(dreamClouds[0]->GetMapId(), dreamClouds[0]->GetPositionX(), dreamClouds[0]->GetPositionY(),
-                           dreamClouds[0]->GetPositionZ(), false, false, false, true,
-                           MovementPriority::MOVEMENT_NORMAL);
-                else if (!nightmareClouds.empty() && bot->GetExactDist2d(nightmareClouds[0]) > 2.0f)
-                    MoveTo(nightmareClouds[0]->GetMapId(), nightmareClouds[0]->GetPositionX(),
-                           nightmareClouds[0]->GetPositionY(), nightmareClouds[0]->GetPositionZ(), false, false, false,
-                           true, MovementPriority::MOVEMENT_NORMAL);
-            }
-        }
-        // Otherwise use GUID-based preference
-        else
-        {
-            // If prefer dream clouds based on GUID
-            if (preferDream)
-            {
-                // If at dream cloud, move to 2nd closest dream cloud or closest nightmare cloud
-                if (atDreamCloud)
-                {
-                    Creature* targetCloud = nullptr;
-                    // Try 2nd closest dream cloud first
-                    if (dreamClouds.size() >= 2 && bot->GetExactDist2d(dreamClouds[1]) > 2.0f)
-                        targetCloud = dreamClouds[1];
-                    // Otherwise move to closest nightmare cloud
-                    else if (!nightmareClouds.empty() && bot->GetExactDist2d(nightmareClouds[0]) > 2.0f)
-                        targetCloud = nightmareClouds[0];
-
-                    if (targetCloud)
-                        MoveTo(targetCloud->GetMapId(), targetCloud->GetPositionX(), targetCloud->GetPositionY(),
-                               targetCloud->GetPositionZ(), false, false, false, true,
-                               MovementPriority::MOVEMENT_NORMAL);
-                }
-                // If at nightmare cloud, move to closest dream cloud or 2nd closest nightmare cloud
-                else if (atNightmareCloud)
-                {
-                    Creature* targetCloud = nullptr;
-                    // Try closest dream cloud first
-                    if (!dreamClouds.empty() && bot->GetExactDist2d(dreamClouds[0]) > 2.0f)
-                        targetCloud = dreamClouds[0];
-                    // Otherwise move to 2nd closest nightmare cloud
-                    else if (nightmareClouds.size() >= 2 && bot->GetExactDist2d(nightmareClouds[1]) > 2.0f)
-                        targetCloud = nightmareClouds[1];
-
-                    if (targetCloud)
-                        MoveTo(targetCloud->GetMapId(), targetCloud->GetPositionX(), targetCloud->GetPositionY(),
-                               targetCloud->GetPositionZ(), false, false, false, true,
-                               MovementPriority::MOVEMENT_NORMAL);
-                }
-                // If not at any cloud, move to closest dream cloud or nightmare cloud based on preference
-                else
-                {
-                    if (!dreamClouds.empty() && bot->GetExactDist2d(dreamClouds[0]) > 2.0f)
-                        MoveTo(dreamClouds[0]->GetMapId(), dreamClouds[0]->GetPositionX(),
-                               dreamClouds[0]->GetPositionY(), dreamClouds[0]->GetPositionZ(), false, false, false,
-                               true, MovementPriority::MOVEMENT_NORMAL);
-                    else if (!nightmareClouds.empty() && bot->GetExactDist2d(nightmareClouds[0]) > 2.0f)
-                        MoveTo(nightmareClouds[0]->GetMapId(), nightmareClouds[0]->GetPositionX(),
-                               nightmareClouds[0]->GetPositionY(), nightmareClouds[0]->GetPositionZ(), false, false,
-                               false, true, MovementPriority::MOVEMENT_NORMAL);
-                }
-            }
-            // If prefer nightmare clouds based on GUID
-            else
-            {
-                // If at nightmare cloud, move to 2nd closest nightmare cloud or closest dream cloud
-                if (atNightmareCloud)
-                {
-                    Creature* targetCloud = nullptr;
-                    // Try 2nd closest nightmare cloud first
-                    if (nightmareClouds.size() >= 2 && bot->GetExactDist2d(nightmareClouds[1]) > 2.0f)
-                        targetCloud = nightmareClouds[1];
-                    // Otherwise move to closest dream cloud
-                    else if (!dreamClouds.empty() && bot->GetExactDist2d(dreamClouds[0]) > 2.0f)
-                        targetCloud = dreamClouds[0];
-
-                    if (targetCloud)
-                        MoveTo(targetCloud->GetMapId(), targetCloud->GetPositionX(), targetCloud->GetPositionY(),
-                               targetCloud->GetPositionZ(), false, false, false, true,
-                               MovementPriority::MOVEMENT_NORMAL);
-                }
-                // If at dream cloud, move to closest nightmare cloud or 2nd closest dream cloud
-                else if (atDreamCloud)
-                {
-                    Creature* targetCloud = nullptr;
-                    // Try closest nightmare cloud first
-                    if (!nightmareClouds.empty() && bot->GetExactDist2d(nightmareClouds[0]) > 2.0f)
-                        targetCloud = nightmareClouds[0];
-                    // Otherwise move to 2nd closest dream cloud
-                    else if (dreamClouds.size() >= 2 && bot->GetExactDist2d(dreamClouds[1]) > 2.0f)
-                        targetCloud = dreamClouds[1];
-
-                    if (targetCloud)
-                        MoveTo(targetCloud->GetMapId(), targetCloud->GetPositionX(), targetCloud->GetPositionY(),
-                               targetCloud->GetPositionZ(), false, false, false, true,
-                               MovementPriority::MOVEMENT_NORMAL);
-                }
-                // If not at any cloud, move to closest nightmare cloud or dream cloud based on preference
-                else
-                {
-                    if (!nightmareClouds.empty() && bot->GetExactDist2d(nightmareClouds[0]) > 2.0f)
-                        MoveTo(nightmareClouds[0]->GetMapId(), nightmareClouds[0]->GetPositionX(),
-                               nightmareClouds[0]->GetPositionY(), nightmareClouds[0]->GetPositionZ(), false, false,
-                               false, true, MovementPriority::MOVEMENT_NORMAL);
-                    else if (!dreamClouds.empty() && bot->GetExactDist2d(dreamClouds[0]) > 2.0f)
-                        MoveTo(dreamClouds[0]->GetMapId(), dreamClouds[0]->GetPositionX(),
-                               dreamClouds[0]->GetPositionY(), dreamClouds[0]->GetPositionZ(), false, false, false,
-                               true, MovementPriority::MOVEMENT_NORMAL);
-                }
-            }
-        }
+        if (!targetCloud)
+            targetCloud = selectCloud(nightmareClouds);
+        if (!targetCloud && !isAtCloud(nearestNightmareCloud))
+            targetCloud = nearestNightmareCloud;
     }
     else
     {
-        // Non-leader bots follow and stack at leader's position
-        if (bot->GetDistance(leader) > PORTALSTART_TOLERANCE)
-        {
-            botAI->Reset();
-            bot->TeleportTo(bot->GetMapId(), leader->GetPositionX(), leader->GetPositionY(), leader->GetPositionZ(),
-                            bot->GetOrientation());
-        }
+        targetCloud = selectCloud(nightmareClouds);
+        if (!targetCloud && !isAtCloud(nearestNightmareCloud))
+            targetCloud = nearestNightmareCloud;
+
+        if (!targetCloud)
+            targetCloud = selectCloud(dreamClouds);
+        if (!targetCloud && !isAtCloud(nearestDreamCloud))
+            targetCloud = nearestDreamCloud;
     }
+
+    if (targetCloud)
+        return MoveTo(targetCloud->GetMapId(), targetCloud->GetPositionX(), targetCloud->GetPositionY(),
+                      targetCloud->GetPositionZ(), false, false, false, true, MovementPriority::MOVEMENT_NORMAL);
 
     return false;
 }
