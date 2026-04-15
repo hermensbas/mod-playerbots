@@ -2747,6 +2747,10 @@ void PlayerbotAI::ResetStrategies(bool load)
     for (uint8 i = 0; i < BOT_STATE_MAX; i++)
         engines[i]->Init();
 
+    // Reset PvP aggression state for random bots on strategy change
+    if (sRandomPlayerbotMgr.IsRandomBot(bot))
+        ResetPvpAggression();
+
     // if (load)
     //     PlayerbotRepository::instance().Load(this);
 }
@@ -5803,6 +5807,38 @@ bool PlayerbotAI::IsOpposing(Player* player) { return IsOpposing(player->getRace
 bool PlayerbotAI::IsOpposing(uint8 race1, uint8 race2)
 {
     return (IsAlliance(race1) && !IsAlliance(race2)) || (!IsAlliance(race1) && IsAlliance(race2));
+}
+
+void PlayerbotAI::ResetPvpAggression()
+{
+    // Random bots re-roll PvP aggression based on configured percentage
+    uint32 const aggressionPercent = sPlayerbotAIConfig.randomBotOpenWorldPvpAggressionPercent;
+    m_isPvpAggressive = (urand(1, 100) <= aggressionPercent);
+}
+
+bool PlayerbotAI::CanInitiatePvP(Unit* target) const
+{
+    // BG / Arena / Isle of Conquest — old behavior, no restrictions
+    if (bot->InBattleground() || bot->InArena())
+        return true;
+
+    // Addbots and Altbots never initiate PvP
+    if (sRandomPlayerbotMgr.IsAddclassBot(bot))
+        return false;
+
+    if (IsAccountAltBot())
+        return false;
+
+    // Random bot with a real player master — never initiate PvP
+    if (sRandomPlayerbotMgr.IsRandomBot(bot) && HasRealPlayerMaster())
+        return false;
+
+    // Random bot without real master — use configured aggression flag
+    if (sRandomPlayerbotMgr.IsRandomBot(bot))
+        return m_isPvpAggressive;
+
+    // Legacy / other bots — old behavior (always aggressive)
+    return true;
 }
 
 void PlayerbotAI::RemoveShapeshift()

@@ -643,6 +643,10 @@ public:
     static bool IsOpposing(uint8 race1, uint8 race2);
     PlayerbotSecurity* GetSecurity() { return &security; }
 
+    // PvP aggression control for open world (does not affect BG/arena/IC)
+    void ResetPvpAggression();
+    bool CanInitiatePvP(Unit* target) const;
+
     Position GetJumpDestination() { return jumpDestination; }
     void SetJumpDestination(Position pos) { jumpDestination = pos; }
     void ResetJumpDestination() { jumpDestination = Position(); }
@@ -696,6 +700,9 @@ private:
 
     // Indicates whether the bot is currently in its PvP gear set (from BG/arena swap logic).
     bool pvpGearActive_ = false;
+
+    // PvP aggression state for open world (does not affect BG/arena/IC)
+    bool m_isPvpAggressive = true;
 
     // Epoch counter incremented each time the bot successfully equips PvP gear.
     uint32 pvpSwapEpoch_ = 0;

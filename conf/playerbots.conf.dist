@@ -1273,6 +1273,19 @@ AiPlayerbot.PvpProhibitedZoneIds = "2255,656,2361,2362,2363,976,35,2268,3425,392
 # PvP Restricted Areas (bots don't pvp)
 AiPlayerbot.PvpProhibitedAreaIds = "976,35,392,2268,4161,4010,4317,4312,3649,3887,3958,3724,4080,3938,3754,3786,3973"
 
+# RandomBot Open World PvP Aggression (percent of random bots that will initiate PvP in open world)
+# 0 = no random bots initiate PvP, 100 = all random bots initiate PvP (legacy behavior)
+# Addbots and Altbots never initiate PvP regardless of this setting
+# Random bots grouped with a real player master never initiate PvP regardless of this setting
+# This setting does not affect Battlegrounds, Arenas, or Isle of Conquest
+# Default: 10
+AiPlayerbot.RandomBotOpenWorldPvpAggressionPercent = 10
+
+# RandomBot Open World PvP Aggression Change Interval (in minutes)
+# How often random bots re-roll their PvP aggression status
+# Default: 30
+AiPlayerbot.RandomBotOpenWorldPvpAggressionChangeInterval = 30
+
 # Improve reaction speeds in battlegrounds and arenas (may cause lag)
 AiPlayerbot.FastReactInBG = 1
 

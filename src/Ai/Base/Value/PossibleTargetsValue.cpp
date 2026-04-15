@@ -10,6 +10,7 @@
 #include "DBCStructure.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
+#include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "SharedDefines.h"
 #include "SpellAuraDefines.h"
@@ -85,6 +86,11 @@ bool PossibleTargetsValue::AcceptUnit(Unit* unit)
 
         if (inCapitalCity)
             return true;
+
+        // Open world PvP aggression restriction for random bots
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (botAI && !botAI->CanInitiatePvP(unit))
+            return false;
 
         // Level difference check
         int32 levelDifference = unit->GetLevel() - bot->GetLevel();

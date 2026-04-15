@@ -360,6 +360,17 @@ randomBotCountChangeMinInterval =
         sConfigMgr->GetOption<int32>("AiPlayerbot.RandomBotAutoJoinBGRatedArena3v3Count", 0);
     randomBotAutoJoinBGRatedArena5v5Count =
         sConfigMgr->GetOption<int32>("AiPlayerbot.RandomBotAutoJoinBGRatedArena5v5Count", 0);
+
+    randomBotOpenWorldPvpAggressionPercent =
+        sConfigMgr->GetOption<uint32>("AiPlayerbot.RandomBotOpenWorldPvpAggressionPercent", 10);
+    if (randomBotOpenWorldPvpAggressionPercent > 100)
+        randomBotOpenWorldPvpAggressionPercent = 100;
+
+    randomBotOpenWorldPvpAggressionChangeInterval =
+        sConfigMgr->GetOption<uint32>("AiPlayerbot.RandomBotOpenWorldPvpAggressionChangeInterval", 30);
+    if (randomBotOpenWorldPvpAggressionChangeInterval == 0)
+        randomBotOpenWorldPvpAggressionChangeInterval = 1;
+
     logInGroupOnly = sConfigMgr->GetOption<bool>("AiPlayerbot.LogInGroupOnly", true);
     logValuesPerTick = sConfigMgr->GetOption<bool>("AiPlayerbot.LogValuesPerTick", false);
     fleeingEnabled = sConfigMgr->GetOption<bool>("AiPlayerbot.FleeingEnabled", true);
