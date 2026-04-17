@@ -285,16 +285,18 @@ bool IccPutricideGrowingOozePuddleTrigger::IsActive()
     if (sPlayerbotAIConfig.EnableICCBuffs && diff && (diff == RAID_DIFFICULTY_10MAN_HEROIC || diff == RAID_DIFFICULTY_25MAN_HEROIC))
     {
         //-------CHEAT-------
-        if (!bot->HasAura(SPELL_EXPERIENCED))
+        if (sPlayerbotAIConfig.EnableICCBuffExperienced && !bot->HasAura(SPELL_EXPERIENCED))
             bot->AddAura(SPELL_EXPERIENCED, bot);
 
-        if (!bot->HasAura(SPELL_AGEIS_OF_DALARAN))
+        if (sPlayerbotAIConfig.EnableICCBuffAegisOfDalaran && !bot->HasAura(SPELL_AGEIS_OF_DALARAN))
             bot->AddAura(SPELL_AGEIS_OF_DALARAN, bot);
 
-        if (!bot->HasAura(SPELL_NO_THREAT) && botAI->HasAggro(boss) && !botAI->IsTank(bot))
+        if (sPlayerbotAIConfig.EnableICCBuffNoThreat && !bot->HasAura(SPELL_NO_THREAT) && botAI->HasAggro(boss) &&
+            !botAI->IsTank(bot))
             bot->AddAura(SPELL_NO_THREAT, bot);
 
-        if (botAI->IsMainTank(bot) && !bot->HasAura(SPELL_SPITEFULL_FURY) && boss->GetVictim() != bot)
+        if (sPlayerbotAIConfig.EnableICCBuffSpitefulFury && botAI->IsMainTank(bot) &&
+            !bot->HasAura(SPELL_SPITEFULL_FURY) && boss->GetVictim() != bot)
             bot->AddAura(SPELL_SPITEFULL_FURY, bot);
         //-------CHEAT-------
     }
@@ -840,16 +842,18 @@ bool IccSindragosaGroupPositionTrigger::IsActive()
     if (sPlayerbotAIConfig.EnableICCBuffs && diff && (diff == RAID_DIFFICULTY_10MAN_HEROIC || diff == RAID_DIFFICULTY_25MAN_HEROIC))
     {
         //-------CHEAT-------
-        if (!bot->HasAura(SPELL_EXPERIENCED))
+        if (sPlayerbotAIConfig.EnableICCBuffExperienced && !bot->HasAura(SPELL_EXPERIENCED))
             bot->AddAura(SPELL_EXPERIENCED, bot);
 
-        if (!bot->HasAura(SPELL_AGEIS_OF_DALARAN))
+        if (sPlayerbotAIConfig.EnableICCBuffAegisOfDalaran && !bot->HasAura(SPELL_AGEIS_OF_DALARAN))
             bot->AddAura(SPELL_AGEIS_OF_DALARAN, bot);
 
-        if (!bot->HasAura(SPELL_NO_THREAT) && botAI->HasAggro(boss) && !botAI->IsTank(bot))
+        if (sPlayerbotAIConfig.EnableICCBuffNoThreat && !bot->HasAura(SPELL_NO_THREAT) && botAI->HasAggro(boss) &&
+            !botAI->IsTank(bot))
             bot->AddAura(SPELL_NO_THREAT, bot);
 
-        if (botAI->IsMainTank(bot) && !bot->HasAura(SPELL_SPITEFULL_FURY) && boss->GetVictim() != bot)
+        if (sPlayerbotAIConfig.EnableICCBuffSpitefulFury && botAI->IsMainTank(bot) &&
+            !bot->HasAura(SPELL_SPITEFULL_FURY) && boss->GetVictim() != bot)
             bot->AddAura(SPELL_SPITEFULL_FURY, bot);
         //-------CHEAT-------
     }

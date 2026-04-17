@@ -238,6 +238,14 @@ randomBotCountChangeMinInterval =
     //////////////////////////// ICC
 
     EnableICCBuffs = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffs", true);
+    EnableICCBuffExperienced = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffExperienced", true);
+    EnableICCBuffAegisOfDalaran = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffAegisOfDalaran", true);
+    EnableICCBuffNoThreat = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffNoThreat", true);
+    EnableICCBuffSpitefulFury = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffSpitefulFury", true);
+    EnableICCBuffPainSuppression = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffPainSuppression", true);
+    EnableICCBuffEmpoweredBlood = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffEmpoweredBlood", true);
+    EnableICCBuffValkyrHammerOfJustice =
+        sConfigMgr->GetOption<bool>("AiPlayerbot.EnableICCBuffValkyrHammerOfJustice", true);
 
     //////////////////////////// Professions
     fishingDistanceFromMaster = sConfigMgr->GetOption<float>("AiPlayerbot.FishingDistanceFromMaster", 10.0f);

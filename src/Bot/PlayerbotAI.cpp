@@ -160,6 +160,85 @@ void SyncBotWithOnFootState(Player* bot)
     bot->RemoveUnitMovementFlag(MOVEMENTFLAG_FLYING);
     bot->SendMovementFlagUpdate();
 }
+
+enum IccCheatSpellIds : uint32
+{
+    SPELL_EMPOWERED_BLOOD_CHEAT = 70227,
+    SPELL_EXPERIENCED_CHEAT = 71188,
+    SPELL_NO_THREAT_CHEAT = 70115,
+    SPELL_SPITEFULL_FURY_CHEAT = 36886,
+    SPELL_PAIN_SUPPRESION_CHEAT = 69910,
+    SPELL_AGEIS_OF_DALARAN_CHEAT = 71638
+};
+
+enum IccEncounterDataIds : uint32
+{
+    DATA_PROFESSOR_PUTRICIDE_CHEAT = 6,
+    DATA_SINDRAGOSA_CHEAT = 11,
+    DATA_THE_LICH_KING_CHEAT = 12
+};
+
+bool HasAnyIccCheatAura(Player const* bot)
+{
+    return bot && (bot->HasAura(SPELL_EMPOWERED_BLOOD_CHEAT) || bot->HasAura(SPELL_EXPERIENCED_CHEAT) ||
+                   bot->HasAura(SPELL_NO_THREAT_CHEAT) || bot->HasAura(SPELL_SPITEFULL_FURY_CHEAT) ||
+                   bot->HasAura(SPELL_PAIN_SUPPRESION_CHEAT) || bot->HasAura(SPELL_AGEIS_OF_DALARAN_CHEAT));
+}
+
+void RemoveIccCheatAura(Player* bot, uint32 spellId)
+{
+    if (!bot)
+        return;
+
+    bot->RemoveAura(spellId);
+}
+
+bool IsAllowedIccCheatAuraContext(Player const* bot)
+{
+    if (!bot || !sPlayerbotAIConfig.EnableICCBuffs)
+        return false;
+
+    if (bot->GetMapId() != 631)
+        return false;
+
+    Difficulty diff = bot->GetRaidDifficulty();
+    if (diff != RAID_DIFFICULTY_10MAN_HEROIC && diff != RAID_DIFFICULTY_25MAN_HEROIC)
+        return false;
+
+    InstanceScript* instance = bot->GetInstanceScript();
+    if (!instance)
+        return false;
+
+    return instance->GetBossState(DATA_PROFESSOR_PUTRICIDE_CHEAT) == IN_PROGRESS ||
+           instance->GetBossState(DATA_SINDRAGOSA_CHEAT) == IN_PROGRESS ||
+           instance->GetBossState(DATA_THE_LICH_KING_CHEAT) == IN_PROGRESS;
+}
+
+void CleanupLeakedIccCheatAuras(Player* bot)
+{
+    if (!HasAnyIccCheatAura(bot))
+        return;
+
+    bool allowedContext = IsAllowedIccCheatAuraContext(bot);
+
+    if (!allowedContext || !sPlayerbotAIConfig.EnableICCBuffEmpoweredBlood)
+        RemoveIccCheatAura(bot, SPELL_EMPOWERED_BLOOD_CHEAT);
+
+    if (!allowedContext || !sPlayerbotAIConfig.EnableICCBuffExperienced)
+        RemoveIccCheatAura(bot, SPELL_EXPERIENCED_CHEAT);
+
+    if (!allowedContext || !sPlayerbotAIConfig.EnableICCBuffNoThreat)
+        RemoveIccCheatAura(bot, SPELL_NO_THREAT_CHEAT);
+
+    if (!allowedContext || !sPlayerbotAIConfig.EnableICCBuffSpitefulFury)
+        RemoveIccCheatAura(bot, SPELL_SPITEFULL_FURY_CHEAT);
+
+    if (!allowedContext || !sPlayerbotAIConfig.EnableICCBuffPainSuppression)
+        RemoveIccCheatAura(bot, SPELL_PAIN_SUPPRESION_CHEAT);
+
+    if (!allowedContext || !sPlayerbotAIConfig.EnableICCBuffAegisOfDalaran)
+        RemoveIccCheatAura(bot, SPELL_AGEIS_OF_DALARAN_CHEAT);
+}
 } // namespace
 
 
@@ -1035,6 +1114,10 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
     // Rooting is enforced server-side via auras/unit states, so it is safe to always strip the flag here.
     if (bot->m_movementInfo.HasMovementFlag(MOVEMENTFLAG_ROOT))
         bot->m_movementInfo.RemoveMovementFlag(MOVEMENTFLAG_ROOT);
+
+    // ICC cheat buffs are only valid during the three intended heroic encounters.
+    // Remove them immediately once the bot leaves that exact context so they cannot be carried elsewhere.
+    CleanupLeakedIccCheatAuras(bot);
 
     // Delayed PvE restore after leaving BG/arena.
     // Leaving a battleground/arena usually involves a map transfer; avoid any heavy work during loading.

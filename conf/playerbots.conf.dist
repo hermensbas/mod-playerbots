@@ -2244,3 +2244,25 @@ AiPlayerbot.SummonAtInnkeepersEnabled = 1
 # Buffs will be applied on PP, Sindragosa and Lich King
 
 AiPlayerbot.EnableICCBuffs = 1
+
+# Отдельные настройки ICC-бафов для ботов. Работают только если включен AiPlayerbot.EnableICCBuffs.
+# Experienced: +30% урона и +20% скорости атаки.
+AiPlayerbot.EnableICCBuffExperienced = 1
+
+# Aegis of Dalaran: +268 ко всем сопротивлениям.
+AiPlayerbot.EnableICCBuffAegisOfDalaran = 1
+
+# No Threat: снижает угрозу у нетанков.
+AiPlayerbot.EnableICCBuffNoThreat = 1
+
+# Spiteful Fury: сильно повышает угрозу у мейн-танка.
+AiPlayerbot.EnableICCBuffSpitefulFury = 1
+
+# Pain Suppression: снижает входящий урон.
+AiPlayerbot.EnableICCBuffPainSuppression = 1
+
+# Empowered Blood: дополнительное усиление на Личе в фазе 40%-60% здоровья босса.
+AiPlayerbot.EnableICCBuffEmpoweredBlood = 1
+
+# Hammer of Justice: оглушает валькирию на Личе.
+AiPlayerbot.EnableICCBuffValkyrHammerOfJustice = 1

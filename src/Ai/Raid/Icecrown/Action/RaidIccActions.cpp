@@ -6762,16 +6762,16 @@ bool IccLichKingShadowTrapAction::Execute(Event /*event*/)
     if (sPlayerbotAIConfig.EnableICCBuffs && diff && (diff == RAID_DIFFICULTY_10MAN_HEROIC || diff == RAID_DIFFICULTY_25MAN_HEROIC))
     {
         //-------CHEAT-------
-        if (!bot->HasAura(SPELL_EXPERIENCED))
+        if (sPlayerbotAIConfig.EnableICCBuffExperienced && !bot->HasAura(SPELL_EXPERIENCED))
             bot->AddAura(SPELL_EXPERIENCED, bot);
 
-        if (!bot->HasAura(SPELL_AGEIS_OF_DALARAN))
+        if (sPlayerbotAIConfig.EnableICCBuffAegisOfDalaran && !bot->HasAura(SPELL_AGEIS_OF_DALARAN))
             bot->AddAura(SPELL_AGEIS_OF_DALARAN, bot);
 
-        if (!bot->HasAura(SPELL_NO_THREAT) && !botAI->IsTank(bot))
+        if (sPlayerbotAIConfig.EnableICCBuffNoThreat && !bot->HasAura(SPELL_NO_THREAT) && !botAI->IsTank(bot))
             bot->AddAura(SPELL_NO_THREAT, bot);
 
-        if (!bot->HasAura(SPELL_PAIN_SUPPRESION))
+        if (sPlayerbotAIConfig.EnableICCBuffPainSuppression && !bot->HasAura(SPELL_PAIN_SUPPRESION))
             bot->AddAura(SPELL_PAIN_SUPPRESION, bot);
         //-------CHEAT-------
     }
@@ -6958,16 +6958,16 @@ bool IccLichKingWinterAction::Execute(Event /*event*/)
     if (sPlayerbotAIConfig.EnableICCBuffs && diff && (diff == RAID_DIFFICULTY_10MAN_HEROIC || diff == RAID_DIFFICULTY_25MAN_HEROIC))
     {
         //------CHEAT-------
-        if (!bot->HasAura(SPELL_EXPERIENCED))
+        if (sPlayerbotAIConfig.EnableICCBuffExperienced && !bot->HasAura(SPELL_EXPERIENCED))
             bot->AddAura(SPELL_EXPERIENCED, bot);
 
-        if (!bot->HasAura(SPELL_AGEIS_OF_DALARAN))
+        if (sPlayerbotAIConfig.EnableICCBuffAegisOfDalaran && !bot->HasAura(SPELL_AGEIS_OF_DALARAN))
             bot->AddAura(SPELL_AGEIS_OF_DALARAN, bot);
 
-        if (!bot->HasAura(SPELL_NO_THREAT) && !botAI->IsTank(bot))
+        if (sPlayerbotAIConfig.EnableICCBuffNoThreat && !bot->HasAura(SPELL_NO_THREAT) && !botAI->IsTank(bot))
             bot->AddAura(SPELL_NO_THREAT, bot);
 
-        if (!bot->HasAura(SPELL_PAIN_SUPPRESION))
+        if (sPlayerbotAIConfig.EnableICCBuffPainSuppression && !bot->HasAura(SPELL_PAIN_SUPPRESION))
             bot->AddAura(SPELL_PAIN_SUPPRESION, bot);
         //------CHEAT-------
     }
@@ -7741,19 +7741,20 @@ bool IccLichKingAddsAction::Execute(Event /*event*/)
     if (sPlayerbotAIConfig.EnableICCBuffs && diff && (diff == RAID_DIFFICULTY_10MAN_HEROIC || diff == RAID_DIFFICULTY_25MAN_HEROIC))
     {
         //------CHEAT-------
-        if (!bot->HasAura(SPELL_EXPERIENCED))
+        if (sPlayerbotAIConfig.EnableICCBuffExperienced && !bot->HasAura(SPELL_EXPERIENCED))
             bot->AddAura(SPELL_EXPERIENCED, bot);
 
-        if (!bot->HasAura(SPELL_AGEIS_OF_DALARAN))
+        if (sPlayerbotAIConfig.EnableICCBuffAegisOfDalaran && !bot->HasAura(SPELL_AGEIS_OF_DALARAN))
             bot->AddAura(SPELL_AGEIS_OF_DALARAN, bot);
 
-        if (boss && boss->HealthBelowPct(60) && boss->HealthAbovePct(40) && !bot->HasAura(SPELL_EMPOWERED_BLOOD))
+        if (sPlayerbotAIConfig.EnableICCBuffEmpoweredBlood && boss && boss->HealthBelowPct(60) &&
+            boss->HealthAbovePct(40) && !bot->HasAura(SPELL_EMPOWERED_BLOOD))
             bot->AddAura(SPELL_EMPOWERED_BLOOD, bot);
 
-        if (!bot->HasAura(SPELL_NO_THREAT) && !botAI->IsTank(bot))
+        if (sPlayerbotAIConfig.EnableICCBuffNoThreat && !bot->HasAura(SPELL_NO_THREAT) && !botAI->IsTank(bot))
             bot->AddAura(SPELL_NO_THREAT, bot);
 
-        if (!bot->HasAura(SPELL_PAIN_SUPPRESION))
+        if (sPlayerbotAIConfig.EnableICCBuffPainSuppression && !bot->HasAura(SPELL_PAIN_SUPPRESION))
             bot->AddAura(SPELL_PAIN_SUPPRESION, bot);
         //------CHEAT-------
     }
@@ -9133,7 +9134,7 @@ void IccLichKingAddsAction::HandleValkyrAssignment(const std::vector<Unit*>& gra
         if (sPlayerbotAIConfig.EnableICCBuffs && diff && (diff == RAID_DIFFICULTY_10MAN_HEROIC || diff == RAID_DIFFICULTY_25MAN_HEROIC))
         {
             //---------CHEAT---------
-            if (!myValkyr->HasAura(SPELL_HAMMER_OF_JUSTICE))
+            if (sPlayerbotAIConfig.EnableICCBuffValkyrHammerOfJustice && !myValkyr->HasAura(SPELL_HAMMER_OF_JUSTICE))
                 bot->AddAura(SPELL_HAMMER_OF_JUSTICE, myValkyr);
             //---------CHEAT---------
         }

@@ -81,6 +81,13 @@ public:
     bool enabled;
     bool disabledWithoutRealPlayer;
     bool EnableICCBuffs;
+    bool EnableICCBuffExperienced;
+    bool EnableICCBuffAegisOfDalaran;
+    bool EnableICCBuffNoThreat;
+    bool EnableICCBuffSpitefulFury;
+    bool EnableICCBuffPainSuppression;
+    bool EnableICCBuffEmpoweredBlood;
+    bool EnableICCBuffValkyrHammerOfJustice;
     bool allowAccountBots, allowGuildBots, allowTrustedAccountBots;
     bool randomBotGuildNearby, randomBotInvitePlayer, inviteChat;
     uint32 globalCoolDown, reactDelay, maxWaitForMove, disableMoveSplinePath, maxMovementSearchTime, expireActionTime,

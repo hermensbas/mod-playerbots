@@ -94,6 +94,7 @@ private:
     void EnsureStandbySlot(TempArenaStandbySlot& slot, uint32 nowMs);
     bool TryBuildStandbySlot(TempArenaStandbySlot& slot, TeamId preferredTeam, uint32 nowMs);
     bool IsEligibleWildArenaBot(Player* bot, uint32 exactLevel, TeamId requiredTeam, uint32 ignoredTeamId = 0) const;
+    bool IsStandbyRosterStillBuildable(TempArenaTeamContext const& ctx) const;
     bool CanTakeBotFromCurrentGroup(Player* bot) const;
     bool IsArenaGroupReady(TempArenaTeamContext const& ctx) const;
     bool IsPlayerActiveForContext(Player* player, TempArenaTeamContext const& ctx) const;

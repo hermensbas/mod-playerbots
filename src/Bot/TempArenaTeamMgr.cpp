@@ -521,6 +521,12 @@ void TempArenaTeamMgr::Update(uint32 /*diff*/)
                     continue;
                 }
 
+                if (!active && !IsArenaGroupReady(ctx) && !IsStandbyRosterStillBuildable(ctx))
+                {
+                    toRemove.push_back(teamId);
+                    continue;
+                }
+
                 if (!active)
                     EnsureGroupReady(leader);
             }
@@ -688,6 +694,63 @@ bool TempArenaTeamMgr::IsEligibleWildArenaBot(Player* bot, uint32 exactLevel, Te
         return false;
 
     return true;
+}
+
+bool TempArenaTeamMgr::IsStandbyRosterStillBuildable(TempArenaTeamContext const& ctx) const
+{
+    auto isBuildableMember = [&](Player* player, TeamId requiredTeam)
+    {
+        if (!player || !player->GetSession() || !player->GetSession()->IsBot())
+            return false;
+
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(player);
+        if (!botAI || botAI->IsRealPlayer() || botAI->HasRealPlayerMaster())
+            return false;
+
+        if (!sPlayerbotAIConfig.IsInRandomAccountList(player->GetSession()->GetAccountId()))
+            return false;
+
+        if (sRandomPlayerbotMgr.IsAddclassBot(player))
+            return false;
+
+        if (!player->IsInWorld() || player->IsDuringRemoveFromWorld())
+            return false;
+
+        if (player->GetLevel() != ctx.leaderLevel || player->GetTeamId() != requiredTeam)
+            return false;
+
+        if (player->GetInstanceId() || player->IsInCombat() || player->InBattleground() || player->InArena() ||
+            player->InBattlegroundQueue())
+            return false;
+
+        if (player->GetGroup() && !CanTakeBotFromCurrentGroup(player))
+            return false;
+
+        if (auto itr = _teamIdByPlayer.find(player->GetGUID()); itr != _teamIdByPlayer.end() && itr->second != ctx.teamId)
+            return false;
+
+        return true;
+    };
+
+    Player* leader = ObjectAccessor::FindConnectedPlayer(ctx.leaderGuid);
+    if (!leader || !ctx.team)
+        return false;
+
+    TeamId requiredTeam = leader->GetTeamId();
+    if (!isBuildableMember(leader, requiredTeam))
+        return false;
+
+    uint32 availableMembers = 1;
+    for (ObjectGuid const& memberGuid : ctx.memberGuids)
+    {
+        Player* member = ObjectAccessor::FindConnectedPlayer(memberGuid);
+        if (!member || !isBuildableMember(member, requiredTeam))
+            return false;
+
+        ++availableMembers;
+    }
+
+    return availableMembers >= ctx.requiredSize;
 }
 
 bool TempArenaTeamMgr::CanTakeBotFromCurrentGroup(Player* bot) const
