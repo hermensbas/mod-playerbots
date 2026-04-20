@@ -105,8 +105,18 @@ ActionBasket* Queue::findHighestRelevanceBasket() const
 
 ActionNode* Queue::extractAndDeleteBasket(ActionBasket* basket)
 {
+    if (!basket)
+        return nullptr;
+
+    auto itr = std::find(actions.begin(), actions.end(), basket);
+    if (itr == actions.end())
+    {
+        LOG_ERROR("playerbots", "Queue::extractAndDeleteBasket called for a basket that is no longer in the queue");
+        return nullptr;
+    }
+
     ActionNode* action = basket->getAction();
-    actions.remove(basket);
+    actions.erase(itr);
     delete basket;
     return action;
 }
@@ -127,7 +137,17 @@ void Queue::removeAndDeleteBaskets(std::list<ActionBasket*>& basketsToRemove)
 {
     for (ActionBasket* basket : basketsToRemove)
     {
-        actions.remove(basket);
+        if (!basket)
+            continue;
+
+        auto itr = std::find(actions.begin(), actions.end(), basket);
+        if (itr == actions.end())
+        {
+            LOG_ERROR("playerbots", "Queue::removeAndDeleteBaskets skipped a basket that is no longer in the queue");
+            continue;
+        }
+
+        actions.erase(itr);
 
         if (ActionNode* action = basket->getAction())
         {

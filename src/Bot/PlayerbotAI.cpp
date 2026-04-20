@@ -1381,9 +1381,35 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
     // Update the bot's group status (moved to helper function)
     UpdateAIGroupMaster();
 
-    // Update internal AI
-    UpdateAIInternal(elapsed, minimal);
-    yieldReact();
+    // Keep one broken bot AI from wedging a whole map update worker.
+    try
+    {
+        UpdateAIInternal(elapsed, minimal);
+        yieldReact();
+    }
+    catch (std::exception const& e)
+    {
+        LOG_ERROR("playerbots", "Exception in PlayerbotAI::UpdateAI for bot {}: {}", bot ? bot->GetName().c_str() : "<unknown>",
+                  e.what());
+        if (MarkLogoutQueued() && bot)
+        {
+            bot->SaveToDB(false, false);
+            auto logoutOp = std::make_unique<BotLogoutOperation>(bot->GetGUID());
+            if (!PlayerbotWorldThreadProcessor::instance().QueueOperation(std::move(logoutOp)))
+                ClearLogoutQueued();
+        }
+    }
+    catch (...)
+    {
+        LOG_ERROR("playerbots", "Unknown exception in PlayerbotAI::UpdateAI for bot {}", bot ? bot->GetName().c_str() : "<unknown>");
+        if (MarkLogoutQueued() && bot)
+        {
+            bot->SaveToDB(false, false);
+            auto logoutOp = std::make_unique<BotLogoutOperation>(bot->GetGUID());
+            if (!PlayerbotWorldThreadProcessor::instance().QueueOperation(std::move(logoutOp)))
+                ClearLogoutQueued();
+        }
+    }
 }
 
 // Helper function for UpdateAI to check group membership and handle removal if necessary

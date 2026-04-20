@@ -28,7 +28,15 @@ GuidVector AttackersValue::Calculate()
     RemoveNonThreating(targets);
 
     // prioritized target
-    GuidVector prioritizedTargets = AI_VALUE(GuidVector, "prioritized targets");
+    AiObjectContext* context = botAI ? botAI->GetAiObjectContext() : nullptr;
+    if (!context)
+        return result;
+
+    Value<GuidVector>* prioritizedTargetsValue = context->GetValue<GuidVector>("prioritized targets");
+    if (!prioritizedTargetsValue)
+        return result;
+
+    GuidVector prioritizedTargets = prioritizedTargetsValue->Get();
     for (ObjectGuid target : prioritizedTargets)
     {
         Unit* unit = botAI->GetUnit(target);
@@ -52,12 +60,15 @@ GuidVector AttackersValue::Calculate()
     // workaround for bots of same faction not fighting in arena
     if (bot->InArena())
     {
-        GuidVector possibleTargets = AI_VALUE(GuidVector, "possible targets");
-        for (ObjectGuid const guid : possibleTargets)
+        if (Value<GuidVector>* possibleTargetsValue = context->GetValue<GuidVector>("possible targets"))
         {
-            Unit* unit = botAI->GetUnit(guid);
-            if (unit && unit->IsPlayer() && IsValidTarget(unit, bot))
-                result.push_back(unit->GetGUID());
+            GuidVector possibleTargets = possibleTargetsValue->Get();
+            for (ObjectGuid const guid : possibleTargets)
+            {
+                Unit* unit = botAI->GetUnit(guid);
+                if (unit && unit->IsPlayer() && IsValidTarget(unit, bot))
+                    result.push_back(unit->GetGUID());
+            }
         }
     }
 

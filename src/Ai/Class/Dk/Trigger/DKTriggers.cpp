@@ -70,7 +70,15 @@ bool DesolationTrigger::IsActive()
 
 bool DeathAndDecayCooldownTrigger::IsActive()
 {
-    uint32 spellId = AI_VALUE2(uint32, "spell id", name);
+    AiObjectContext* context = botAI ? botAI->GetAiObjectContext() : nullptr;
+    if (!context)
+        return false;
+
+    Value<uint32>* spellIdValue = context->GetValue<uint32>("spell id", name);
+    if (!spellIdValue)
+        return false;
+
+    uint32 spellId = spellIdValue->Get();
     if (!spellId)
         return true;
 
