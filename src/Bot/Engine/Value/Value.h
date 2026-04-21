@@ -7,8 +7,13 @@
 #define _PLAYERBOT_VALUE_H
 
 #include <time.h>
+#include <algorithm>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #include "AiObject.h"
+#include "Log.h"
 #include "ObjectGuid.h"
 #include "PerfMonitor.h"
 #include "Timer.h"
@@ -28,6 +33,15 @@ public:
 };
 
 struct CreatureData;
+
+namespace playerbots::detail
+{
+    inline std::vector<std::string>& ValueEvaluationStack()
+    {
+        thread_local std::vector<std::string> stack;
+        return stack;
+    }
+}
 
 class UntypedValue : public AiNamedObject
 {
@@ -72,11 +86,7 @@ public:
     {
         if (checkInterval < 2)
         {
-            // PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_VALUE, this->getName(),
-            // this->context ? &this->context->performanceStack : nullptr);
-            value = Calculate();
-            // if (pmo)
-            //     pmo->finish();
+            value = RecalculateValue();
         }
         else
         {
@@ -84,11 +94,7 @@ public:
             if (!lastCheckTime || now - lastCheckTime >= checkInterval)
             {
                 lastCheckTime = now;
-                // PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_VALUE, this->getName(),
-                // this->context ? &this->context->performanceStack : nullptr);
-                value = Calculate();
-                // if (pmo)
-                //     pmo->finish();
+                value = RecalculateValue();
             }
         }
         return value;
@@ -105,11 +111,7 @@ public:
     {
         if (checkInterval < 2)
         {
-            // PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_VALUE, this->getName(),
-            // this->context ? &this->context->performanceStack : nullptr);
-            value = Calculate();
-            // if (pmo)
-            //     pmo->finish();
+            value = RecalculateValue();
         }
         else
         {
@@ -117,11 +119,7 @@ public:
             if (!lastCheckTime || now - lastCheckTime >= checkInterval)
             {
                 lastCheckTime = now;
-                // PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_VALUE, this->getName(),
-                // this->context ? &this->context->performanceStack : nullptr);
-                value = Calculate();
-                // if (pmo)
-                //     pmo->finish();
+                value = RecalculateValue();
             }
         }
         return value;
@@ -131,11 +129,59 @@ public:
     void Reset() override { lastCheckTime = 0; }
 
 protected:
+    class EvaluationGuard
+    {
+    public:
+        EvaluationGuard(std::string const& name, bool& reentrant) : _active(false)
+        {
+            std::vector<std::string>& stack = playerbots::detail::ValueEvaluationStack();
+            if (std::find(stack.begin(), stack.end(), name) != stack.end())
+            {
+                reentrant = true;
+                std::ostringstream trace;
+                for (std::size_t i = 0; i < stack.size(); ++i)
+                    trace << (i == 0 ? "" : " -> ") << stack[i];
+
+                LOG_ERROR("playerbots",
+                    "Detected recursive AI value evaluation for '{}'. Evaluation chain: {} -> {}. Returning cached value to avoid stack overflow.",
+                    name, trace.str(), name);
+                return;
+            }
+
+            stack.push_back(name);
+            _active = true;
+        }
+
+        ~EvaluationGuard()
+        {
+            if (_active)
+                playerbots::detail::ValueEvaluationStack().pop_back();
+        }
+
+    private:
+        bool _active;
+    };
+
+    T RecalculateValue()
+    {
+        bool reentrant = false;
+        EvaluationGuard guard(this->getName(), reentrant);
+        if (reentrant)
+            return value;
+
+        // PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_VALUE, this->getName(),
+        // this->context ? &this->context->performanceStack : nullptr);
+        T calculated = Calculate();
+        // if (pmo)
+        //     pmo->finish();
+        return calculated;
+    }
+
     virtual T Calculate() = 0;
 
     uint32 checkInterval;
     uint32 lastCheckTime;
-    T value;
+    T value{};
 };
 
 template <class T>
@@ -156,7 +202,7 @@ public:
 
             PerfMonitorOperation* pmo = sPerfMonitor.start(
                 PERF_MON_VALUE, this->getName(), this->context ? &this->context->performanceStack : nullptr);
-            this->value = this->Calculate();
+            this->value = this->RecalculateValue();
             if (pmo)
                 pmo->finish();
         }

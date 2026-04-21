@@ -125,7 +125,7 @@ Unit* UnitCalculatedValue::Get()
     {
         PerfMonitorOperation* pmo = sPerfMonitor.start(
             PERF_MON_VALUE, this->getName(), this->context ? &this->context->performanceStack : nullptr);
-        value = Calculate();
+        value = RecalculateValue();
         if (pmo)
             pmo->finish();
     }
@@ -137,7 +137,7 @@ Unit* UnitCalculatedValue::Get()
             lastCheckTime = now;
             PerfMonitorOperation* pmo = sPerfMonitor.start(
                 PERF_MON_VALUE, this->getName(), this->context ? &this->context->performanceStack : nullptr);
-            value = Calculate();
+            value = RecalculateValue();
             if (pmo)
                 pmo->finish();
         }
