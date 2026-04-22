@@ -195,6 +195,29 @@ void PlayerbotWorldThreadProcessor::ClearQueue()
     m_stats.currentQueueSize = 0;
 }
 
+void PlayerbotWorldThreadProcessor::DrainQueue()
+{
+    uint32 drainedBatches = 0;
+
+    while (GetQueueSize() > 0)
+    {
+        ProcessBatch();
+        ++drainedBatches;
+
+        // Safety valve against re-queuing loops during shutdown.
+        if (drainedBatches >= m_maxQueueSize)
+        {
+            LOG_ERROR("playerbots",
+                      "PlayerbotWorldThreadProcessor::DrainQueue reached safety limit with {} operations still queued",
+                      GetQueueSize());
+            break;
+        }
+    }
+
+    if (drainedBatches > 0)
+        LOG_INFO("playerbots", "Drained {} bot operation batches during shutdown", drainedBatches);
+}
+
 PlayerbotWorldThreadProcessor::Statistics PlayerbotWorldThreadProcessor::GetStatistics() const
 {
     std::lock_guard<std::mutex> statsLock(m_statsMutex);

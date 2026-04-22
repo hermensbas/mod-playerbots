@@ -78,6 +78,14 @@ public:
     void ClearQueue();
 
     /**
+     * @brief Drain queued operations immediately in the world thread
+     *
+     * Used during shutdown to ensure queued bot logouts are executed before
+     * maps start unloading.
+     */
+    void DrainQueue();
+
+    /**
      * @brief Get statistics about operation processing
      */
     struct Statistics

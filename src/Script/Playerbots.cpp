@@ -492,7 +492,8 @@ class PlayerbotsWorldScript : public WorldScript
 public:
     PlayerbotsWorldScript() : WorldScript("PlayerbotsWorldScript", {
         WORLDHOOK_ON_BEFORE_WORLD_INITIALIZED,
-        WORLDHOOK_ON_UPDATE
+        WORLDHOOK_ON_UPDATE,
+        WORLDHOOK_ON_SHUTDOWN
     }) {}
 
     void OnBeforeWorldInitialized() override
@@ -532,6 +533,11 @@ public:
         PlayerbotWorldThreadProcessor::instance().Update(diff);
         sRandomPlayerbotMgr.UpdateAI(diff);  // World thread only
         sTempArenaTeamMgr.Update(diff);
+    }
+
+    void OnShutdown() override
+    {
+        PlayerbotWorldThreadProcessor::instance().DrainQueue();
     }
 };
 
