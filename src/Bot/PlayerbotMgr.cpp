@@ -995,6 +995,15 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
 
     if (cmd == "add" || cmd == "addaccount" || cmd == "login")
     {
+        Player* master = ObjectAccessor::FindConnectedPlayer(masterguid);
+        if (master && IsInWintergraspBattlefield(master))
+        {
+            uint32 botAccountId = GetAccountId(guid);
+            bool isAltBot = botAccountId && botAccountId == masterAccountId;
+            if (!isAltBot)
+                return "you cannot add non-alt bots in Wintergrasp";
+        }
+
         if (ObjectAccessor::FindPlayer(guid))
             return "player already logged in";
 
@@ -1341,6 +1350,12 @@ std::vector<std::string> PlayerbotHolder::HandlePlayerbotCommand(char const* arg
 
     if (!strcmp(cmd, "addclass"))
     {
+        if (IsInWintergraspBattlefield(master))
+        {
+            messages.push_back("You cannot addclass non-alt bots in Wintergrasp");
+            return messages;
+        }
+
         if (sPlayerbotAIConfig.addClassCommand == 0 && master->GetSession()->GetSecurity() < SEC_GAMEMASTER)
         {
             messages.push_back("You do not have permission to create bot by addclass command");

@@ -151,6 +151,13 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
     if (!summoner || summoner == player)
         return false;
 
+    if (PlayerbotAI* targetBotAI = GET_PLAYERBOT_AI(player);
+        targetBotAI && !targetBotAI->IsRealPlayer() && IsInWintergraspBattlefield(summoner))
+    {
+        botAI->TellError("You cannot summon non-alt bots in Wintergrasp");
+        return false;
+    }
+
     // Do not allow teleport/summon inside battlegrounds or arenas.
     // This prevents using the "summon" command (and any other SummonAction-based teleports)
     // to move bots around in PvP instances.
@@ -200,13 +207,23 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
                     return false;
                 }
 
+                if (bot->isDead())
+                {
+                    uint32 const cooldownLeft = GetBotSummonDeathCooldownLeft(bot->GetGUID());
+                    if (cooldownLeft > 0)
+                    {
+                        botAI->TellError("You cannot summon me yet after death");
+                        return false;
+                    }
+                }
+
                 bool revive =
                     sPlayerbotAIConfig.reviveBotWhenSummoned == 2 ||
                     (sPlayerbotAIConfig.reviveBotWhenSummoned == 1 && !summoner->IsInCombat() && summoner->IsAlive());
 
                 if (bot->isDead() && revive)
                 {
-                    bot->ResurrectPlayer(1.0f, false);
+                    bot->ResurrectPlayer(0.2f, false);
                     bot->SpawnCorpseBones();
                     botAI->TellMasterNoFacing("I live, again!");
                     botAI->GetAiObjectContext()->GetValue<GuidVector>("prioritized targets")->Reset();

@@ -25,6 +25,8 @@
 #include "DatabaseLoader.h"
 #include "GuildTaskMgr.h"
 #include "ArenaScript.h"
+#include "Battlefield.h"
+#include "BattlefieldMgr.h"
 #include "PlayerScript.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotGuildMgr.h"
@@ -34,11 +36,16 @@
 #include "ScriptMgr.h"
 #include "PlayerbotCommandScript.h"
 #include "TempArenaTeamMgr.h"
+#include "GameTime.h"
 #include "cmath"
 #include "BattleGroundTactics.h"
+#include <unordered_map>
 
 namespace
 {
+constexpr uint32 BOT_SUMMON_DEATH_COOLDOWN_SECS = 60;
+std::unordered_map<ObjectGuid::LowType, uint32> g_botSummonDeathCooldownUntil;
+
 template <class F>
 void ForEachMasterControlledBot(Player* master, F&& fn)
 {
@@ -156,6 +163,8 @@ class PlayerbotsPlayerScript : public PlayerScript
 public:
     PlayerbotsPlayerScript() : PlayerScript("PlayerbotsPlayerScript", {
         PLAYERHOOK_ON_LOGIN,
+        PLAYERHOOK_ON_PLAYER_JUST_DIED,
+        PLAYERHOOK_ON_PLAYER_RESURRECT,
         PLAYERHOOK_ON_AFTER_UPDATE,
         PLAYERHOOK_ON_BEFORE_CRITERIA_PROGRESS,
         PLAYERHOOK_ON_BEFORE_ACHI_COMPLETE,
@@ -200,6 +209,22 @@ public:
                     + roundedTime + "' minutes.");
             }
         }
+    }
+
+    void OnPlayerJustDied(Player* player) override
+    {
+        if (!player || !player->GetSession() || !player->GetSession()->IsBot())
+            return;
+
+        SetBotSummonDeathCooldown(player->GetGUID(), BOT_SUMMON_DEATH_COOLDOWN_SECS);
+    }
+
+    void OnPlayerResurrect(Player* player, float /*restore_percent*/, bool /*applySickness*/) override
+    {
+        if (!player || !player->GetSession() || !player->GetSession()->IsBot())
+            return;
+
+        ClearBotSummonDeathCooldown(player->GetGUID());
     }
 
     bool OnPlayerBeforeTeleport(Player* /*player*/, uint32 /*mapid*/, float /*x*/, float /*y*/, float /*z*/,
@@ -251,6 +276,13 @@ public:
     void OnPlayerAfterUpdate(Player* player, uint32 diff) override
     {
         PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+
+        if (botAI && !botAI->IsRealPlayer() && botAI->HasActivePlayerMaster() &&
+            IsInWintergraspBattlefield(player) && !player->IsBeingTeleported())
+        {
+            sRandomPlayerbotMgr.RandomTeleportForLevel(player);
+            return;
+        }
 
         if (botAI != nullptr && !botAI->IsLogoutQueued())
         {
@@ -712,4 +744,39 @@ void AddPlayerbotsScripts()
     AddPlayerbotsCommandscripts();
     PlayerBotsGuildValidationScript();
     AddSC_TempestKeepBotScripts();
+}
+
+void SetBotSummonDeathCooldown(ObjectGuid guid, uint32 durationSecs)
+{
+    g_botSummonDeathCooldownUntil[guid.GetCounter()] = GameTime::GetGameTime().count() + durationSecs;
+}
+
+uint32 GetBotSummonDeathCooldownLeft(ObjectGuid guid)
+{
+    uint32 const now = GameTime::GetGameTime().count();
+    auto itr = g_botSummonDeathCooldownUntil.find(guid.GetCounter());
+    if (itr == g_botSummonDeathCooldownUntil.end())
+        return 0;
+
+    if (itr->second <= now)
+    {
+        g_botSummonDeathCooldownUntil.erase(itr);
+        return 0;
+    }
+
+    return itr->second - now;
+}
+
+void ClearBotSummonDeathCooldown(ObjectGuid guid)
+{
+    g_botSummonDeathCooldownUntil.erase(guid.GetCounter());
+}
+
+bool IsInWintergraspBattlefield(Player* player)
+{
+    if (!player)
+        return false;
+
+    Battlefield* battlefield = sBattlefieldMgr->GetBattlefieldToZoneId(player->GetZoneId());
+    return battlefield && battlefield->GetBattleId() == BATTLEFIELD_BATTLEID_WG;
 }
