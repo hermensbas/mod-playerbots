@@ -9,6 +9,7 @@
 #include "Event.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
+#include "InstanceScript.h"
 #include "NearestGameObjects.h"
 #include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
@@ -207,7 +208,9 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
                     return false;
                 }
 
-                if (bot->isDead())
+                bool const isGhost = bot->HasPlayerFlag(PLAYER_FLAGS_GHOST);
+
+                if (bot->isDead() && isGhost)
                 {
                     uint32 const cooldownLeft = GetBotSummonDeathCooldownLeft(bot->GetGUID());
                     if (cooldownLeft > 0)
@@ -223,6 +226,35 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
 
                 if (bot->isDead() && revive)
                 {
+                    if (!isGhost)
+                        revive = false;
+                }
+
+                if (bot->isDead() && revive)
+                {
+                    Map* summonerMap = summoner->GetMap();
+                    if (summonerMap && summonerMap->IsDungeon())
+                    {
+                        if (InstanceMap* instanceMap = summonerMap->ToInstanceMap())
+                        {
+                            if (InstanceScript* instance = instanceMap->GetInstanceScript();
+                                instance && instance->IsEncounterInProgress())
+                            {
+                                revive = false;
+                            }
+                        }
+                    }
+                }
+
+                if (bot->isDead() && revive)
+                {
+                    uint32 const cooldownLeft = GetBotSummonDeathCooldownLeft(bot->GetGUID());
+                    if (cooldownLeft > 0)
+                    {
+                        botAI->TellError("You cannot summon me yet after death");
+                        return false;
+                    }
+
                     bot->ResurrectPlayer(0.2f, false);
                     bot->SpawnCorpseBones();
                     botAI->TellMasterNoFacing("I live, again!");

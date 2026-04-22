@@ -6,6 +6,7 @@
 #include "PlayerbotMgr.h"
 
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <string>
 #include <unordered_set>
@@ -43,6 +44,15 @@
 
 namespace
 {
+std::string NormalizeCommand(std::string text)
+{
+    auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };
+    text.erase(text.begin(), std::find_if(text.begin(), text.end(), notSpace));
+    text.erase(std::find_if(text.rbegin(), text.rend(), notSpace).base(), text.end());
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) { return std::tolower(ch); });
+    return text;
+}
+
 template <class F>
 void ForEachControlledRandomBot(Player* master, F&& fn)
 {
@@ -73,6 +83,34 @@ void ForEachControlledRandomBot(Player* master, F&& fn)
     }
 
     tlsControlledGuids.swap(controlledGuids);
+}
+
+bool HasBotsBlockedBySummonDeathCooldown(PlayerbotMgr* mgr, Player* master)
+{
+    if (!mgr || !master)
+        return false;
+
+    for (PlayerBotMap::const_iterator it = mgr->GetPlayerBotsBegin(); it != mgr->GetPlayerBotsEnd(); ++it)
+    {
+        Player* const bot = it->second;
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+        if (!botAI || botAI->IsRealPlayer())
+            continue;
+
+        if (bot->isDead() && bot->HasPlayerFlag(PLAYER_FLAGS_GHOST) &&
+            GetBotSummonDeathCooldownLeft(bot->GetGUID()) > 0)
+            return true;
+    }
+
+    bool hasBlockedBots = false;
+    ForEachControlledRandomBot(master, [&](Player* bot, PlayerbotAI* /*botAI*/)
+    {
+        if (!hasBlockedBots && bot->isDead() && bot->HasPlayerFlag(PLAYER_FLAGS_GHOST) &&
+            GetBotSummonDeathCooldownLeft(bot->GetGUID()) > 0)
+            hasBlockedBots = true;
+    });
+
+    return hasBlockedBots;
 }
 } // namespace
 
@@ -1763,6 +1801,8 @@ void PlayerbotMgr::HandleCommand(uint32 type, std::string const text)
     if (!master)
         return;
 
+    std::string const normalizedCommand = NormalizeCommand(text);
+
     if (!sPlayerbotAIConfig.commandSeparator.empty() && text.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
     {
         std::vector<std::string> commands;
@@ -1787,6 +1827,9 @@ void PlayerbotMgr::HandleCommand(uint32 type, std::string const text)
     {
         botAI->HandleCommand(type, text, master);
     });
+
+    if (normalizedCommand == "summon" && HasBotsBlockedBySummonDeathCooldown(this, master))
+        ChatHandler(master->GetSession()).PSendSysMessage("Some bots were not summoned because their post-death summon timer has not expired yet.");
 }
 
 void PlayerbotMgr::HandleMasterIncomingPacket(WorldPacket const& packet)
