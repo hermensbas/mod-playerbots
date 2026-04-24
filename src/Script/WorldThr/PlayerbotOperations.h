@@ -6,6 +6,7 @@
 #ifndef _PLAYERBOT_OPERATIONS_H
 #define _PLAYERBOT_OPERATIONS_H
 
+#include "ChannelMgr.h"
 #include "Group.h"
 #include "GroupMgr.h"
 #include "GuildMgr.h"
@@ -21,6 +22,72 @@
 #include "UseMeetingStoneAction.h"
 #include "WorldSession.h"
 #include "WorldSessionMgr.h"
+
+class ChannelSayOperation : public PlayerbotOperation
+{
+public:
+    ChannelSayOperation(ObjectGuid botGuid, std::string message, uint32 channelId, std::string zoneName, bool isWorldChannel)
+        : m_botGuid(botGuid), m_message(std::move(message)), m_channelId(channelId), m_zoneName(std::move(zoneName)), m_isWorldChannel(isWorldChannel)
+    {
+    }
+
+    bool Execute() override
+    {
+        Player* bot = ObjectAccessor::FindPlayer(m_botGuid);
+        if (!bot || !bot->GetSession() || bot->GetSession()->isLogingOut())
+            return false;
+
+        ChannelMgr* channelMgr = ChannelMgr::forTeam(bot->GetTeamId());
+        if (!channelMgr)
+            return false;
+
+        if (m_isWorldChannel)
+        {
+            if (Channel* worldChannel = channelMgr->GetChannel("World", bot, false))
+            {
+                worldChannel->Say(bot->GetGUID(), m_message.c_str(), LANG_UNIVERSAL);
+                return true;
+            }
+
+            return false;
+        }
+
+        for (auto const& [key, channel] : channelMgr->GetChannels())
+        {
+            if (!channel || channel->GetChannelId() != m_channelId || channel->GetName().empty())
+                continue;
+
+            bool const zoneMatches = channel->GetName().find(m_zoneName) != std::string::npos;
+            if (m_channelId != ChatChannelId::LOOKING_FOR_GROUP &&
+                m_channelId != ChatChannelId::WORLD_DEFENSE &&
+                !zoneMatches)
+            {
+                continue;
+            }
+
+            channel->Say(bot->GetGUID(), m_message.c_str(), LANG_UNIVERSAL);
+            return true;
+        }
+
+        return false;
+    }
+
+    ObjectGuid GetBotGuid() const override { return m_botGuid; }
+    uint32 GetPriority() const override { return 20; }
+    std::string GetName() const override { return m_isWorldChannel ? "ChannelSayWorld" : "ChannelSay"; }
+
+    bool IsValid() const override
+    {
+        return !m_botGuid.IsEmpty() && !m_message.empty();
+    }
+
+private:
+    ObjectGuid m_botGuid;
+    std::string m_message;
+    uint32 m_channelId;
+    std::string m_zoneName;
+    bool m_isWorldChannel;
+};
 
 // Group invite operation
 class GroupInviteOperation : public PlayerbotOperation

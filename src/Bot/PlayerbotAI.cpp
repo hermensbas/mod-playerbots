@@ -3781,6 +3781,14 @@ bool PlayerbotAI::SayToWorld(const std::string& msg)
     if (!cMgr)
         return false;
 
+    // ChannelMgr owns shared chat state. Defer channel access to the world thread
+    // while map updates are running on worker threads.
+    if (sMapMgr->GetMapUpdater()->activated())
+    {
+        auto sayOp = std::make_unique<ChannelSayOperation>(bot->GetGUID(), msg, 0, std::string(), true);
+        return PlayerbotWorldThreadProcessor::instance().QueueOperation(std::move(sayOp));
+    }
+
     // no zone
     if (Channel* worldChannel = cMgr->GetChannel("World", bot))
     {
@@ -3807,8 +3815,13 @@ bool PlayerbotAI::SayToChannel(const std::string& msg, const ChatChannelId& chan
 
     const auto current_str_zone = GetLocalizedAreaName(current_zone);
 
-    std::mutex socialMutex;
-    std::lock_guard<std::mutex> lock(socialMutex);  // Blocking for thread safety when accessing SocialMgr
+    // ChannelMgr channel storage is not safe to traverse from map worker threads.
+    // Buffer channel chatter and deliver it later in the world thread.
+    if (sMapMgr->GetMapUpdater()->activated())
+    {
+        auto sayOp = std::make_unique<ChannelSayOperation>(bot->GetGUID(), msg, static_cast<uint32>(chanId), current_str_zone, false);
+        return PlayerbotWorldThreadProcessor::instance().QueueOperation(std::move(sayOp));
+    }
 
     for (auto const& [key, channel] : cMgr->GetChannels())
     {
