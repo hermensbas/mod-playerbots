@@ -537,6 +537,7 @@ public:
 
     void OnShutdown() override
     {
+        sRandomPlayerbotMgr.LogoutAllBots();
         PlayerbotWorldThreadProcessor::instance().DrainQueue();
     }
 };

@@ -18,6 +18,7 @@
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotMgr.h"
 #include "PlayerbotRepository.h"
+#include "PlayerbotWorldThreadProcessor.h"
 #include "RandomPlayerbotMgr.h"
 #include "UseMeetingStoneAction.h"
 #include "WorldSession.h"
@@ -515,6 +516,51 @@ private:
     ObjectGuid m_botGuid;
 };
 
+class BotSessionCleanupOperation : public PlayerbotOperation
+{
+public:
+    BotSessionCleanupOperation(ObjectGuid botGuid, WorldSession* botSession, uint32 attempt = 0)
+        : m_botGuid(botGuid), m_botSession(botSession), m_attempt(attempt)
+    {
+    }
+
+    bool Execute() override
+    {
+        if (!m_botSession)
+            return false;
+
+        if (m_botSession->GetPlayer())
+        {
+            if (m_attempt >= 10)
+            {
+                LOG_DEBUG("playerbots", "Bot session cleanup timed out for {}", m_botGuid.ToString());
+                return false;
+            }
+
+            return PlayerbotWorldThreadProcessor::instance().QueueOperation(
+                std::unique_ptr<PlayerbotOperation>(new BotSessionCleanupOperation(m_botGuid, m_botSession, m_attempt + 1)));
+        }
+
+        delete m_botSession;
+        m_botSession = nullptr;
+        return true;
+    }
+
+    ObjectGuid GetBotGuid() const override { return m_botGuid; }
+    uint32 GetPriority() const override { return 95; }
+    std::string GetName() const override { return "BotSessionCleanup"; }
+
+    bool IsValid() const override
+    {
+        return m_botSession != nullptr;
+    }
+
+private:
+    ObjectGuid m_botGuid;
+    WorldSession* m_botSession;
+    uint32 m_attempt;
+};
+
 // Full bot logout operation executed in the world thread to avoid visibility/map-thread use-after-free.
 class BotLogoutOperation : public PlayerbotOperation
 {
@@ -539,7 +585,10 @@ public:
             return true;
 
         if (botSession->isLogingOut())
-            return true;
+        {
+            return PlayerbotWorldThreadProcessor::instance().QueueOperation(
+                std::unique_ptr<PlayerbotOperation>(new BotSessionCleanupOperation(m_botGuid, botSession)));
+        }
 
         if (Group* group = bot->GetGroup(); group && !bot->InBattleground() && !bot->InBattlegroundQueue() && botAI->HasActivePlayerMaster())
             PlayerbotRepository::instance().Save(botAI);
@@ -554,9 +603,8 @@ public:
 
         botAI->TellMaster("Goodbye!");
         botSession->LogoutPlayer(true);
-        bot->SetSession(nullptr);
-        delete botSession;
-        return true;
+        return PlayerbotWorldThreadProcessor::instance().QueueOperation(
+            std::unique_ptr<PlayerbotOperation>(new BotSessionCleanupOperation(m_botGuid, botSession)));
     }
 
     ObjectGuid GetBotGuid() const override { return m_botGuid; }
@@ -631,8 +679,8 @@ public:
                 if (WorldSession* botSession = bot->GetSession())
                 {
                     botSession->LogoutPlayer(true);
-                    bot->SetSession(nullptr);
-                    delete botSession;
+                    PlayerbotWorldThreadProcessor::instance().QueueOperation(
+                        std::unique_ptr<PlayerbotOperation>(new BotSessionCleanupOperation(m_botGuid, botSession)));
                 }
 
                 return false;
@@ -650,8 +698,8 @@ public:
                 if (WorldSession* botSession = bot->GetSession())
                 {
                     botSession->LogoutPlayer(true);
-                    bot->SetSession(nullptr);
-                    delete botSession;
+                    PlayerbotWorldThreadProcessor::instance().QueueOperation(
+                        std::unique_ptr<PlayerbotOperation>(new BotSessionCleanupOperation(m_botGuid, botSession)));
                 }
             }
 

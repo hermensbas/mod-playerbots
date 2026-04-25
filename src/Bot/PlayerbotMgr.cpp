@@ -774,8 +774,6 @@ void PlayerbotHolder::DisablePlayerBot(ObjectGuid guid)
         if (botAI->GetAiObjectContext())  // Maybe some day re-write to delate all pointer values.
         {
             TravelTarget* target = botAI->GetAiObjectContext()->GetValue<TravelTarget*>("travel target")->Get();
-            if (target)
-                delete target;
         }
 
         RemoveFromPlayerbotsMap(guid);  // deletes bot player ptr inside this WorldSession PlayerBotMap
