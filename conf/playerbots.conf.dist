@@ -128,7 +128,7 @@ AiPlayerbot.DisabledWithoutRealPlayerLogoutDelay = 300
 # The maximum number of bots that a player can control simultaneously
 AiPlayerbot.MaxAddedBots = 40
 
-# Enable/Disable adding or removing bots while the master is in combat
+# Enable/Disable adding or removing bots while the master is in combat or during a boss encounter
 # Default: 0 (disabled)
 AiPlayerbot.AllowOnlineOfflineInCombat = 0
 

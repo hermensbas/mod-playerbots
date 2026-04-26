@@ -24,6 +24,7 @@
 #include "Define.h"
 #include "Group.h"
 #include "GuildMgr.h"
+#include "InstanceScript.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "PlayerbotAIConfig.h"
@@ -111,6 +112,18 @@ bool HasBotsBlockedBySummonDeathCooldown(PlayerbotMgr* mgr, Player* master)
     });
 
     return hasBlockedBots;
+}
+
+bool IsOnlineOfflineBlockedByBossEncounter(Player* master)
+{
+    if (!master)
+        return false;
+
+    if (InstanceScript* instance = master->GetInstanceScript();
+        instance && instance->IsEncounterInProgress())
+        return true;
+
+    return false;
 }
 } // namespace
 
@@ -1047,8 +1060,14 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
     if (cmd == "add" || cmd == "addaccount" || cmd == "login")
     {
         Player* master = ObjectAccessor::FindConnectedPlayer(masterguid);
-        if (master && master->IsInCombat() && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
-            return "ERROR: You can not add bots while in combat.";
+        if (master && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
+        {
+            if (master->IsInCombat())
+                return "ERROR: You can not add bots while in combat.";
+
+            if (IsOnlineOfflineBlockedByBossEncounter(master))
+                return "ERROR: You can not add bots during a boss encounter.";
+        }
 
         if (master && IsInWintergraspBattlefield(master))
         {
@@ -1087,8 +1106,14 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
     else if (cmd == "remove" || cmd == "logout" || cmd == "rm")
     {
         Player* master = ObjectAccessor::FindConnectedPlayer(masterguid);
-        if (master && master->IsInCombat() && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
-            return "ERROR: You can not remove bots while in combat.";
+        if (master && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
+        {
+            if (master->IsInCombat())
+                return "ERROR: You can not remove bots while in combat.";
+
+            if (IsOnlineOfflineBlockedByBossEncounter(master))
+                return "ERROR: You can not remove bots during a boss encounter.";
+        }
 
         if (!ObjectAccessor::FindPlayer(guid))
             return "player is offline";
@@ -1412,10 +1437,19 @@ std::vector<std::string> PlayerbotHolder::HandlePlayerbotCommand(char const* arg
 
     if (!strcmp(cmd, "addclass"))
     {
-        if (master->IsInCombat() && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
+        if (!sPlayerbotAIConfig.allowOnlineOfflineInCombat)
         {
-            messages.push_back("ERROR: You can not add bots while in combat.");
-            return messages;
+            if (master->IsInCombat())
+            {
+                messages.push_back("ERROR: You can not add bots while in combat.");
+                return messages;
+            }
+
+            if (IsOnlineOfflineBlockedByBossEncounter(master))
+            {
+                messages.push_back("ERROR: You can not add bots during a boss encounter.");
+                return messages;
+            }
         }
 
         if (IsInWintergraspBattlefield(master))
