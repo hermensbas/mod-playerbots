@@ -6,6 +6,7 @@
 #include "BattleGroundTactics.h"
 
 #include <algorithm>
+#include <mutex>
 
 #include "ArenaTeam.h"
 #include "ArenaTeamMgr.h"
@@ -114,11 +115,13 @@ enum BattleBotWsgWaitSpot
 };
 
 std::unordered_map<uint32, BGStrategyData> bgStrategies;
+std::mutex bgStrategiesLock;
 
 namespace
 {
 uint32 constexpr RING_OF_VALOR_START_HOLD_MS = 20 * IN_MILLISECONDS;
 std::unordered_map<uint32, uint32> arenaStartHoldByInstance;
+std::mutex arenaStartHoldByInstanceLock;
 }
 
 std::vector<uint32> const vFlagsAV = {
@@ -1439,6 +1442,7 @@ std::string const BGTactics::HandleConsoleCommandPrivate(WorldSession* session, 
 // Depends on OnBattlegroundStart in playerbots.cpp
 uint8 BGTactics::GetBotStrategyForTeam(Battleground* bg, TeamId teamId)
 {
+    std::lock_guard<std::mutex> guard(bgStrategiesLock);
     auto itr = bgStrategies.find(bg->GetInstanceID());
     if (itr == bgStrategies.end())
         return 0;
@@ -4257,6 +4261,7 @@ bool ArenaTactics::Execute(Event /*event*/)
 {
     if (!bot->InBattleground())
     {
+        std::lock_guard<std::mutex> guard(arenaStartHoldByInstanceLock);
         arenaStartHoldByInstance.erase(bot->GetBattlegroundId());
         bool IsRandomBot = sRandomPlayerbotMgr.IsRandomBot(bot->GetGUID().GetCounter());
         botAI->ChangeStrategy("-arena", BOT_STATE_COMBAT);
@@ -4275,12 +4280,14 @@ bool ArenaTactics::Execute(Event /*event*/)
 
     if (bg->GetStatus() == STATUS_WAIT_LEAVE)
     {
+        std::lock_guard<std::mutex> guard(arenaStartHoldByInstanceLock);
         arenaStartHoldByInstance.erase(instanceId);
         return BGStatusAction::LeaveBG(botAI);
     }
 
     if (bg->GetStatus() != STATUS_IN_PROGRESS)
     {
+        std::lock_guard<std::mutex> guard(arenaStartHoldByInstanceLock);
         arenaStartHoldByInstance.erase(instanceId);
         return false;
     }
@@ -4294,6 +4301,7 @@ bool ArenaTactics::Execute(Event /*event*/)
     // Keep bots idle on Ring of Valor while players are still rising on the elevators.
     if (bg->GetBgTypeID(true) == BATTLEGROUND_RV)
     {
+        std::lock_guard<std::mutex> guard(arenaStartHoldByInstanceLock);
         uint32& arenaStartHoldMs = arenaStartHoldByInstance[instanceId];
         if (!arenaStartHoldMs)
             arenaStartHoldMs = getMSTime();
@@ -4303,6 +4311,7 @@ bool ArenaTactics::Execute(Event /*event*/)
     }
     else
     {
+        std::lock_guard<std::mutex> guard(arenaStartHoldByInstanceLock);
         arenaStartHoldByInstance.erase(instanceId);
     }
 

@@ -9,6 +9,8 @@
 #include "BattlegroundAV.h"
 #include "MovementActions.h"
 
+#include <mutex>
+
 class ChatHandler;
 class Battleground;
 class PlayerbotAI;
@@ -58,6 +60,7 @@ struct BGStrategyData
 };
 
 extern std::unordered_map<uint32, BGStrategyData> bgStrategies;
+extern std::mutex bgStrategiesLock;
 
 struct BattleBotWaypoint
 {

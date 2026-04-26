@@ -3459,6 +3459,8 @@ void TravelMgr::LoadQuestTravelTable()
                 }
             }
 
+            delete session;
+
             std::vector<std::string> actionKeys;
 
             for (auto& action : actions)

@@ -715,12 +715,18 @@ public:
                 break;
         }
 
-        bgStrategies[bg->GetInstanceID()] = data;
+        {
+            std::lock_guard<std::mutex> guard(bgStrategiesLock);
+            bgStrategies[bg->GetInstanceID()] = data;
+        }
     }
 
     void OnBattlegroundEnd(Battleground* bg, TeamId /*winnerTeam*/) override
     {
-        bgStrategies.erase(bg->GetInstanceID());
+        {
+            std::lock_guard<std::mutex> guard(bgStrategiesLock);
+            bgStrategies.erase(bg->GetInstanceID());
+        }
         sTempArenaTeamMgr.HandleBattlegroundEnd(bg);
     }
 };
