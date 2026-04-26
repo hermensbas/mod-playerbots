@@ -755,6 +755,15 @@ void PlayerbotHolder::DisablePlayerBot(ObjectGuid guid)
         {
             return;
         }
+
+        // Never tear down bot AI while the player is still in world.
+        // Core logout/remove-from-world must finish first.
+        if (bot->IsInWorld())
+        {
+            LOG_DEBUG("playerbots", "Skipping early DisablePlayerBot for in-world bot {}", bot->GetName().c_str());
+            return;
+        }
+
         // Keep master->controlled random-bots index clean (safe no-op if not tracked).
         sRandomPlayerbotMgr.OnRandomBotLoggedOut(guid);
         botAI->TellMaster("Goodbye!");
@@ -1032,6 +1041,9 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
     if (cmd == "add" || cmd == "addaccount" || cmd == "login")
     {
         Player* master = ObjectAccessor::FindConnectedPlayer(masterguid);
+        if (master && master->IsInCombat() && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
+            return "ERROR: You can not add bots while in combat.";
+
         if (master && IsInWintergraspBattlefield(master))
         {
             uint32 botAccountId = GetAccountId(guid);
@@ -1064,6 +1076,10 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
     }
     else if (cmd == "remove" || cmd == "logout" || cmd == "rm")
     {
+        Player* master = ObjectAccessor::FindConnectedPlayer(masterguid);
+        if (master && master->IsInCombat() && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
+            return "ERROR: You can not remove bots while in combat.";
+
         if (!ObjectAccessor::FindPlayer(guid))
             return "player is offline";
 
@@ -1386,6 +1402,12 @@ std::vector<std::string> PlayerbotHolder::HandlePlayerbotCommand(char const* arg
 
     if (!strcmp(cmd, "addclass"))
     {
+        if (master->IsInCombat() && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
+        {
+            messages.push_back("ERROR: You can not add bots while in combat.");
+            return messages;
+        }
+
         if (IsInWintergraspBattlefield(master))
         {
             messages.push_back("You cannot addclass non-alt bots in Wintergrasp");

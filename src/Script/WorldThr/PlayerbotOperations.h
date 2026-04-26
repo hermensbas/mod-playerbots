@@ -594,6 +594,8 @@ public:
             PlayerbotRepository::instance().Save(botAI);
 
         ObjectGuid masterGuid = botAI->GetMasterGuid();
+        botSession->LogoutPlayer(true);
+
         sRandomPlayerbotMgr.OnRandomBotLoggedOut(m_botGuid);
 
         if (PlayerbotMgr* playerbotMgr = PlayerbotsMgr::instance().GetPlayerbotMgr(masterGuid))
@@ -601,8 +603,6 @@ public:
 
         sRandomPlayerbotMgr.RemoveFromPlayerbotsMap(m_botGuid);
 
-        botAI->TellMaster("Goodbye!");
-        botSession->LogoutPlayer(true);
         return PlayerbotWorldThreadProcessor::instance().QueueOperation(
             std::unique_ptr<PlayerbotOperation>(new BotSessionCleanupOperation(m_botGuid, botSession)));
     }

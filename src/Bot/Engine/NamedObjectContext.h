@@ -7,6 +7,7 @@
 #define _PLAYERBOT_NAMEDOBJECTCONEXT_H
 
 #include <list>
+#include <mutex>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -169,6 +170,7 @@ public:
 
     ~NamedObjectContextList()
     {
+        std::lock_guard<std::recursive_mutex> guard(createdLock);
         for (typename std::unordered_map<std::string, T*>::const_iterator i = created.begin(); i != created.end(); i++)
         {
             if (i->second)
@@ -203,6 +205,7 @@ public:
 
     T* GetContextObject(const std::string& name, PlayerbotAI* botAI)
     {
+        std::lock_guard<std::recursive_mutex> guard(createdLock);
         if (created.find(name) == created.end())
         {
             if (T* object = create(name, botAI))
@@ -246,12 +249,16 @@ public:
 
     std::set<std::string> GetCreated()
     {
+        std::lock_guard<std::recursive_mutex> guard(createdLock);
         std::set<std::string> result;
         for (typename std::unordered_map<std::string, T*>::const_iterator i = created.begin(); i != created.end(); i++)
             result.insert(i->first);
 
         return result;
     }
+
+private:
+    mutable std::recursive_mutex createdLock;
 };
 
 template <class T>

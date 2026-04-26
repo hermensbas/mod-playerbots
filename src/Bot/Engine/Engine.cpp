@@ -187,6 +187,10 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
         }
         else if (action->isUseful())
         {
+            std::string const actionName = action->getName();
+            std::vector<NextAction> const actionContinuers = actionNode->getContinuers();
+            std::vector<NextAction> const actionAlternatives = actionNode->getAlternatives();
+
             // Apply multipliers early to avoid unnecessary iterations
             for (Multiplier* multiplier : multipliers)
             {
@@ -195,7 +199,7 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
 
                 if (relevance <= 0)
                 {
-                    LogAction("Multiplier %s made action %s useless", multiplier->getName().c_str(), action->getName().c_str());
+                    LogAction("Multiplier %s made action %s useless", multiplier->getName().c_str(), actionName.c_str());
                     break;
                 }
             }
@@ -204,7 +208,7 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
             {
                 if (!skipPrerequisites)
                 {
-                    LogAction("A:%s - PREREQ", action->getName().c_str());
+                    LogAction("A:%s - PREREQ", actionName.c_str());
 
                     if (MultiplyAndPush(actionNode->getPrerequisites(), relevance + 0.002f, false, event, "prereq"))
                     {
@@ -213,28 +217,28 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
                     }
                 }
 
-                PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_ACTION, action->getName(), &aiObjectContext->performanceStack);
+                PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_ACTION, actionName, &aiObjectContext->performanceStack);
                 actionExecuted = ListenAndExecute(action, event);
                 if (pmo)
                     pmo->finish();
 
                 if (actionExecuted)
                 {
-                    LogAction("A:%s - OK", action->getName().c_str());
-                    MultiplyAndPush(actionNode->getContinuers(), relevance, false, event, "cont");
+                    LogAction("A:%s - OK", actionName.c_str());
+                    MultiplyAndPush(actionContinuers, relevance, false, event, "cont");
                     lastRelevance = relevance;
                     break;
                 }
                 else
                 {
-                    LogAction("A:%s - FAILED", action->getName().c_str());
-                    MultiplyAndPush(actionNode->getAlternatives(), relevance + 0.003f, false, event, "alt");
+                    LogAction("A:%s - FAILED", actionName.c_str());
+                    MultiplyAndPush(actionAlternatives, relevance + 0.003f, false, event, "alt");
                 }
             }
             else
             {
-                LogAction("A:%s - IMPOSSIBLE", action->getName().c_str());
-                MultiplyAndPush(actionNode->getAlternatives(), relevance + 0.003f, false, event, "alt");
+                LogAction("A:%s - IMPOSSIBLE", actionName.c_str());
+                MultiplyAndPush(actionAlternatives, relevance + 0.003f, false, event, "alt");
             }
         }
         else
