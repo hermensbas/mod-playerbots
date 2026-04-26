@@ -486,6 +486,12 @@ void PlayerbotHolder::AddPlayerBot(ObjectGuid playerGuid, uint32 masterAccountId
         allowed = false;
         out << "Failure: You are not allowed to control bot " << botName.c_str();
     }
+    if (!isRndbot && masterPlayer && !sPlayerbotAIConfig.IsInRandomAccountList(accountId) &&
+        sCharacterCache->GetCharacterTeamByGuid(playerGuid) != masterPlayer->GetTeamId())
+    {
+        allowed = false;
+        out << "Failure: You cannot add an alt bot from the opposite faction";
+    }
     if (masterAccountId && masterPlayer)
     {
         PlayerbotMgr* mgr = GET_PLAYERBOT_MGR(masterPlayer);
@@ -1055,10 +1061,14 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
         if (ObjectAccessor::FindPlayer(guid))
             return "player already logged in";
 
+        uint32 accountId = sCharacterCache->GetCharacterAccountIdByGuid(guid);
+        if (master && accountId && !sPlayerbotAIConfig.IsInRandomAccountList(accountId) &&
+            sCharacterCache->GetCharacterTeamByGuid(guid) != master->GetTeamId())
+            return "you cannot add an alt bot from the opposite faction";
+
         // For addaccount command, verify it's an account name
         if (cmd == "addaccount")
         {
-            uint32 accountId = sCharacterCache->GetCharacterAccountIdByGuid(guid);
             if (!accountId)
             {
                 return "character not found";
