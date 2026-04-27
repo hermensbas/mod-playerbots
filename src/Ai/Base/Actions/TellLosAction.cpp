@@ -36,6 +36,26 @@ bool IsAllDigits(std::string const& token)
            std::all_of(token.begin(), token.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; });
 }
 
+bool CanUseGameObject(Player* bot, GameObject* go)
+{
+    if (!bot || !go || !go->isSpawned())
+        return false;
+
+    if (go->HasGameObjectFlag(GO_FLAG_NOT_SELECTABLE | GO_FLAG_IN_USE))
+        return false;
+
+    if (!go->IsWithinDistInMap(bot, go->GetInteractionDistance()))
+        return false;
+
+    if (bot->m_mover != bot)
+    {
+        if (!(bot->IsOnVehicle(bot->m_mover) || bot->IsMounted()) && !go->GetGOInfo()->IsUsableMounted())
+            return false;
+    }
+
+    return true;
+}
+
 std::string ToLowerCopy(std::string token)
 {
     std::transform(token.begin(), token.end(), token.begin(),
@@ -302,7 +322,7 @@ void TellLosAction::ListGameObjects(std::string const title, GuidVector gos, Pla
     for (ObjectGuid const guid : gos)
     {
         GameObject* go = botAI->GetGameObject(guid);
-        if (!go)
+        if (!CanUseGameObject(bot, go))
             continue;
 
         float dist = bot->GetDistance2d(go);
