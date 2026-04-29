@@ -288,6 +288,9 @@ bool RpgTrainAction::isPossible()
     if (!trainer)
         return false;
 
+    if (trainer->GetTrainerType() == Trainer::Type::Pet)
+        return false;
+
     if (!trainer->IsTrainerValidForPlayer(bot))
         return false;
 

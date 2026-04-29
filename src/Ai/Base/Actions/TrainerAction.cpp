@@ -23,6 +23,9 @@ bool TrainerAction::Execute(Event event)
     if (!trainer)
         return false;
 
+    if (trainer->GetTrainerType() == Trainer::Type::Pet)
+        return false;
+
     // NOTE: Original version uses SpellIds here, but occasionally only inserts
     // a single spell ID value from parameters. If someone wants to impl multiple
     // spells as parameters, check SkipSpellsListAction::parseIds as an example.
@@ -58,6 +61,9 @@ bool TrainerAction::isPossible()
 
     Trainer::Trainer* trainer = sObjectMgr->GetTrainer(target->GetEntry());
     if (!trainer)
+        return false;
+
+    if (trainer->GetTrainerType() == Trainer::Type::Pet)
         return false;
 
     if (!trainer->IsTrainerValidForPlayer(bot))
