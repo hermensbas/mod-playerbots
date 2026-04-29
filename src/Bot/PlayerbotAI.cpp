@@ -2090,10 +2090,26 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
     {
         if (!bot->GetSession()->isLogingOut())
         {
+            Player* currentMaster = GetMaster();
+            if (currentMaster && !sPlayerbotAIConfig.allowOnlineOfflineInCombat)
+            {
+                if (currentMaster->IsInCombat())
+                {
+                    TellMaster("ERROR: You can not remove bots while in combat.");
+                    return;
+                }
+
+                if (InstanceScript* instance = currentMaster->GetInstanceScript();
+                    instance && instance->IsEncounterInProgress())
+                {
+                    TellMaster("ERROR: You can not remove bots during a boss encounter.");
+                    return;
+                }
+            }
+
             if (type == CHAT_MSG_WHISPER)
                 TellMaster("I'm logging out!");
 
-            Player* currentMaster = GetMaster();
             PlayerbotMgr* masterBotMgr = currentMaster ? sPlayerbotsMgr.GetPlayerbotMgr(currentMaster->GetGUID()) : nullptr;
             if (masterBotMgr)
                 masterBotMgr->LogoutPlayerBot(bot->GetGUID());
