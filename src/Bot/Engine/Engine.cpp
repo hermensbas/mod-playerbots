@@ -448,10 +448,11 @@ void Engine::ProcessTriggers(bool minimal)
         if (!node)
             continue;
 
+        std::string const triggerName = node->getName();
         Trigger* trigger = node->getTrigger();
         if (!trigger)
         {
-            trigger = aiObjectContext->GetTrigger(node->getName());
+            trigger = aiObjectContext->GetTrigger(triggerName);
             node->setTrigger(trigger);
         }
 
@@ -467,7 +468,7 @@ void Engine::ProcessTriggers(bool minimal)
                 continue;
 
             PerfMonitorOperation* pmo =
-                sPerfMonitor.start(PERF_MON_TRIGGER, trigger->getName(), &aiObjectContext->performanceStack);
+                sPerfMonitor.start(PERF_MON_TRIGGER, triggerName, &aiObjectContext->performanceStack);
             Event event = trigger->Check();
             if (pmo)
                 pmo->finish();
@@ -476,7 +477,7 @@ void Engine::ProcessTriggers(bool minimal)
                 continue;
 
             fires[trigger] = event;
-            LogAction("T:%s", trigger->getName().c_str());
+            LogAction("T:%s", triggerName.c_str());
         }
     }
 
