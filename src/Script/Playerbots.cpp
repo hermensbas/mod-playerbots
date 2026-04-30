@@ -662,6 +662,7 @@ public:
     void OnPlayerbotLogoutBots() override
     {
         LOG_INFO("playerbots", "Logging out all bots...");
+        PlayerbotsMgr::instance().LogoutAllPlayerOwnedBots();
         sRandomPlayerbotMgr.LogoutAllBots();
         PlayerbotWorldThreadProcessor::instance().DrainQueue();
     }

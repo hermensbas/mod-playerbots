@@ -2183,6 +2183,24 @@ PlayerbotMgr* PlayerbotsMgr::GetPlayerbotMgr(ObjectGuid const& guid)
     return nullptr;
 }
 
+void PlayerbotsMgr::LogoutAllPlayerOwnedBots()
+{
+    std::vector<PlayerbotMgr*> holders;
+    holders.reserve(_playerbotsMgrMap.size());
+
+    for (auto const& [guid, holder] : _playerbotsMgrMap)
+    {
+        if (guid.IsEmpty() || !holder || holder->IsBotAI())
+            continue;
+
+        if (PlayerbotMgr* playerbotMgr = dynamic_cast<PlayerbotMgr*>(holder))
+            holders.push_back(playerbotMgr);
+    }
+
+    for (PlayerbotMgr* holder : holders)
+        holder->LogoutAllBots();
+}
+
 void PlayerbotMgr::HandleSetSecurityKeyCommand(Player* player, const std::string& key)
 {
     uint32 accountId = player->GetSession()->GetAccountId();

@@ -115,6 +115,7 @@ public:
     PlayerbotAI* GetPlayerbotAI(ObjectGuid const& guid);
     PlayerbotMgr* GetPlayerbotMgr(Player* player);
     PlayerbotMgr* GetPlayerbotMgr(ObjectGuid const& guid);
+    void LogoutAllPlayerOwnedBots();
 
 private:
     PlayerbotsMgr() = default;
