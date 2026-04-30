@@ -44,9 +44,6 @@ bool CanUseGameObject(Player* bot, GameObject* go)
     if (go->HasGameObjectFlag(GO_FLAG_NOT_SELECTABLE | GO_FLAG_IN_USE))
         return false;
 
-    if (!go->IsWithinDistInMap(bot, go->GetInteractionDistance()))
-        return false;
-
     if (bot->m_mover != bot)
     {
         if (!(bot->IsOnVehicle(bot->m_mover) || bot->IsMounted()) && !go->GetGOInfo()->IsUsableMounted())
@@ -260,18 +257,18 @@ bool TellLosAction::Execute(Event event)
     if (!IsLosResponder(botAI, event, request, owner))
         return true;
 
-    if (category.empty() || category == "targets")
+    if (category == "targets")
     {
         ListUnits("--- Targets ---", *context->GetValue<GuidVector>("possible targets"));
         ListUnits("--- Targets (All) ---", *context->GetValue<GuidVector>("all targets"));
     }
 
-    if (category.empty() || category == "npcs")
+    if (category == "npcs")
     {
         ListUnits("--- NPCs ---", *context->GetValue<GuidVector>("nearest npcs"));
     }
 
-    if (category.empty() || category == "corpses")
+    if (category == "corpses")
     {
         ListUnits("--- Corpses ---", *context->GetValue<GuidVector>("nearest corpses"));
     }
@@ -281,12 +278,12 @@ bool TellLosAction::Execute(Event event)
         ListGameObjects("--- Game objects ---", *context->GetValue<GuidVector>("nearest game objects"), owner);
     }
 
-    if (category.empty() || category == "players")
+    if (category == "players")
     {
         ListUnits("--- Friendly players ---", *context->GetValue<GuidVector>("nearest friendly players"));
     }
 
-    if (category.empty() || category == "triggers")
+    if (category == "triggers")
     {
         ListUnits("--- Triggers ---", *context->GetValue<GuidVector>("possible triggers"));
     }
@@ -326,7 +323,7 @@ void TellLosAction::ListGameObjects(std::string const title, GuidVector gos, Pla
             continue;
 
         float dist = bot->GetDistance2d(go);
-        if (dist > 30.0f)
+        if (dist > 50.0f)
             continue;
 
         filtered.push_back({go->GetGUID(), dist});

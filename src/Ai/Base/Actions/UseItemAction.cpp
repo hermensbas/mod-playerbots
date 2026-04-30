@@ -53,7 +53,7 @@ static bool TryParseLosIndex(std::string const& text, uint32& outIndex)
 
 namespace
 {
-constexpr time_t USE_CHAT_COMMAND_COOLDOWN_SEC = 10;
+constexpr time_t USE_CHAT_COMMAND_COOLDOWN_SEC = 5;
 
 std::unordered_map<ObjectGuid, time_t> s_useChatCommandCooldowns;
 std::mutex s_useChatCommandCooldownsMutex;
@@ -78,7 +78,7 @@ bool CheckAndStartUseChatCommandCooldown(PlayerbotAI* botAI, Event& event)
         time_t const elapsed = now - it->second;
         if (elapsed >= 0 && elapsed < USE_CHAT_COMMAND_COOLDOWN_SEC)
         {
-            botAI->TellError("Use command is on cooldown. Wait 10 seconds.");
+            botAI->TellError("Use command is on cooldown. Wait 5 seconds.");
             return false;
         }
     }
