@@ -24,6 +24,7 @@ void PlayerbotTextMgr::replaceAll(std::string& str, const std::string& from, con
 
 void PlayerbotTextMgr::LoadBotTexts()
 {
+    std::lock_guard<std::recursive_mutex> guard(lock);
     LOG_INFO("playerbots", "Loading playerbots texts...");
 
     uint32 count = 0;
@@ -53,6 +54,7 @@ void PlayerbotTextMgr::LoadBotTexts()
 
 void PlayerbotTextMgr::LoadBotTextChance()
 {
+    std::lock_guard<std::recursive_mutex> guard(lock);
     if (botTextChance.empty())
     {
         QueryResult results = PlayerbotsDatabase.Query("SELECT name, probability FROM ai_playerbot_texts_chance");
@@ -74,19 +76,21 @@ void PlayerbotTextMgr::LoadBotTextChance()
 
 std::string PlayerbotTextMgr::GetBotText(std::string name)
 {
+    std::lock_guard<std::recursive_mutex> guard(lock);
     if (botTexts.empty())
     {
         LOG_ERROR("playerbots", "Can't get bot text {}! No bots texts loaded!", name);
         return "";
     }
 
-    if (botTexts[name].empty())
+    auto botTextIt = botTexts.find(name);
+    if (botTextIt == botTexts.end() || botTextIt->second.empty())
     {
         LOG_ERROR("playerbots", "Can't get bot text {}! No bots texts for this name!", name);
         return "";
     }
 
-    std::vector<BotTextEntry>& list = botTexts[name];
+    std::vector<BotTextEntry>& list = botTextIt->second;
     BotTextEntry textEntry = list[urand(0, list.size() - 1)];
     return !textEntry.m_text[GetLocalePriority()].empty() ? textEntry.m_text[GetLocalePriority()] : textEntry.m_text[0];
 }
@@ -123,18 +127,21 @@ std::string PlayerbotTextMgr::GetBotTextOrDefault(std::string name, std::string 
 
 std::string PlayerbotTextMgr::GetBotText(ChatReplyType replyType, std::map<std::string, std::string> placeholders)
 {
+    std::lock_guard<std::recursive_mutex> guard(lock);
     if (botTexts.empty())
     {
         LOG_ERROR("playerbots", "Can't get bot text reply {}! No bots texts loaded!", replyType);
         return "";
     }
-    if (botTexts["reply"].empty())
+
+    auto replyIt = botTexts.find("reply");
+    if (replyIt == botTexts.end() || replyIt->second.empty())
     {
         LOG_ERROR("playerbots", "Can't get bot text reply {}! No bots texts replies!", replyType);
         return "";
     }
 
-    std::vector<BotTextEntry>& list = botTexts["reply"];
+    std::vector<BotTextEntry>& list = replyIt->second;
     std::vector<BotTextEntry> proper_list;
     for (auto text : list)
     {
@@ -166,10 +173,12 @@ std::string PlayerbotTextMgr::GetBotText(ChatReplyType replyType, std::string na
 
 bool PlayerbotTextMgr::rollTextChance(std::string name)
 {
-    if (!botTextChance[name])
+    std::lock_guard<std::recursive_mutex> guard(lock);
+    auto chanceIt = botTextChance.find(name);
+    if (chanceIt == botTextChance.end() || !chanceIt->second)
         return true;
 
-    return urand(0, 100) < botTextChance[name];
+    return urand(0, 100) < chanceIt->second;
 }
 
 bool PlayerbotTextMgr::GetBotText(std::string name, std::string& text)
@@ -192,6 +201,7 @@ bool PlayerbotTextMgr::GetBotText(std::string name, std::string& text, std::map<
 
 void PlayerbotTextMgr::AddLocalePriority(uint32 locale)
 {
+    std::lock_guard<std::recursive_mutex> guard(lock);
     if (locale >= MAX_LOCALES)
     {
         LOG_WARN("playerbots", "Ignoring locale {} for bot texts because it exceeds MAX_LOCALES ({})", locale, MAX_LOCALES - 1);
@@ -203,6 +213,7 @@ void PlayerbotTextMgr::AddLocalePriority(uint32 locale)
 
 uint32 PlayerbotTextMgr::GetLocalePriority()
 {
+    std::lock_guard<std::recursive_mutex> guard(lock);
     // if no real players online, reset top locale
     uint32 const activeSessions = sWorldSessionMgr->GetActiveSessionCount();
     if (!activeSessions)
@@ -223,6 +234,7 @@ uint32 PlayerbotTextMgr::GetLocalePriority()
 
 void PlayerbotTextMgr::ResetLocalePriority()
 {
+    std::lock_guard<std::recursive_mutex> guard(lock);
     for (uint8 i = 0; i < MAX_LOCALES; ++i)
     {
         botTextLocalePriority[i] = 0;

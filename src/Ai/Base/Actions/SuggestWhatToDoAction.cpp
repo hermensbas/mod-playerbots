@@ -20,6 +20,7 @@
 #include "Playerbots.h"
 #include "ServerFacade.h"
 #include "Channel.h"
+#include <mutex>
 
 enum eTalkType
 {
@@ -34,6 +35,12 @@ enum eTalkType
 
 std::map<std::string, uint8> SuggestDungeonAction::instances;
 std::map<std::string, uint8> SuggestWhatToDoAction::factions;
+
+namespace
+{
+std::once_flag s_suggestFactionsInitOnce;
+std::once_flag s_suggestInstancesInitOnce;
+}
 
 SuggestWhatToDoAction::SuggestWhatToDoAction(PlayerbotAI* botAI, std::string const name)
     : InventoryAction{botAI, name}, _dbc_locale{sWorld->GetDefaultDbcLocale()}
@@ -143,7 +150,7 @@ void SuggestWhatToDoAction::grindMaterials()
 
 void SuggestWhatToDoAction::grindReputation()
 {
-    if (factions.empty())
+    std::call_once(s_suggestFactionsInitOnce, []()
     {
         factions["Argent Dawn"] = 60;
         factions["Bloodsail Buccaneers"] = 40;
@@ -179,7 +186,7 @@ void SuggestWhatToDoAction::grindReputation()
         factions["Knights of the Ebon Blade"] = 77;
         factions["The Sons of Hodir"] = 78;
         factions["The Wyrmrest Accord"] = 77;
-    }
+    });
 
     std::vector<std::string> levels;
     levels.push_back("honored");
@@ -258,7 +265,7 @@ bool SuggestDungeonAction::Execute(Event /*event*/)
     if (!sPlayerbotAIConfig.randomBotSuggestDungeons || bot->GetGroup())
         return false;
 
-    if (instances.empty())
+    std::call_once(s_suggestInstancesInitOnce, []()
     {
         instances["Ragefire Chasm"] = 15;
         instances["Deadmines"] = 18;
@@ -302,7 +309,7 @@ bool SuggestDungeonAction::Execute(Event /*event*/)
         instances["Forge of Souls"] = 80;
         instances["Pit of Saron"] = 80;
         instances["Halls of Reflection"] = 80;
-    }
+    });
 
     std::vector<std::string> allowedInstances;
     for (auto it : instances)

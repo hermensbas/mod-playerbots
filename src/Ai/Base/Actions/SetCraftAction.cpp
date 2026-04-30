@@ -9,8 +9,14 @@
 #include "CraftValue.h"
 #include "Event.h"
 #include "Playerbots.h"
+#include <mutex>
 
 std::map<uint32, SkillLineAbilityEntry const*> SetCraftAction::skillSpells;
+
+namespace
+{
+std::once_flag s_setCraftSkillSpellsInitOnce;
+}
 
 bool SetCraftAction::Execute(Event event)
 {
@@ -46,11 +52,11 @@ bool SetCraftAction::Execute(Event event)
     if (!proto)
         return false;
 
-    if (skillSpells.empty())
+    std::call_once(s_setCraftSkillSpellsInitOnce, []()
     {
         for (SkillLineAbilityEntry const* skillLine : sSkillLineAbilityStore)
             skillSpells[skillLine->Spell] = skillLine;
-    }
+    });
 
     data.required.clear();
     data.obtained.clear();
@@ -66,7 +72,11 @@ bool SetCraftAction::Execute(Event event)
         if (!spellInfo)
             continue;
 
-        SkillLineAbilityEntry const* skillLine = skillSpells[spellId];
+        SkillLineAbilityEntry const* skillLine = nullptr;
+        auto skillIt = skillSpells.find(spellId);
+        if (skillIt != skillSpells.end())
+            skillLine = skillIt->second;
+
         if (skillLine != nullptr)
         {
             for (uint8 i = 0; i < 3; ++i)

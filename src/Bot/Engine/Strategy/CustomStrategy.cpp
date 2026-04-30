@@ -12,6 +12,11 @@
 
 std::map<std::string, std::string> CustomStrategy::actionLinesCache;
 
+namespace
+{
+std::mutex s_actionLinesCacheLock;
+}
+
 NextAction toNextAction(std::string const action)
 {
     std::vector<std::string> tokens = split(action, '!');
@@ -57,7 +62,15 @@ void CustomStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
 {
     if (actionLines.empty())
     {
-        if (actionLinesCache[qualifier].empty())
+        std::string cachedActionLines;
+        {
+            std::lock_guard<std::mutex> guard(s_actionLinesCacheLock);
+            auto cacheIt = actionLinesCache.find(qualifier);
+            if (cacheIt != actionLinesCache.end())
+                cachedActionLines = cacheIt->second;
+        }
+
+        if (cachedActionLines.empty())
         {
             LoadActionLines((uint32)botAI->GetBot()->GetGUID().GetCounter());
             if (actionLines.empty())
@@ -65,7 +78,7 @@ void CustomStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
         }
         else
         {
-            std::vector<std::string> tokens = split(actionLinesCache[qualifier], '\n');
+            std::vector<std::string> tokens = split(cachedActionLines, '\n');
             std::regex tpl("\\(nullptr,\\s*'.+',\\s*'(.+)'\\)(,|;)");
             for (std::vector<std::string>::iterator i = tokens.begin(); i != tokens.end(); ++i)
             {
@@ -110,5 +123,7 @@ void CustomStrategy::LoadActionLines(uint32 owner)
 void CustomStrategy::Reset()
 {
     actionLines.clear();
-    actionLinesCache[qualifier].clear();
+
+    std::lock_guard<std::mutex> guard(s_actionLinesCacheLock);
+    actionLinesCache.erase(qualifier);
 }

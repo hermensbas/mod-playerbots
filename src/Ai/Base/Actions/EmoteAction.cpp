@@ -8,15 +8,20 @@
 #include "Event.h"
 #include "Playerbots.h"
 #include "ServerFacade.h"
+#include <mutex>
 
 std::map<std::string, uint32> EmoteActionBase::emotes;
 std::map<std::string, uint32> EmoteActionBase::textEmotes;
 char* strstri(char const* haystack, char const* needle);
 
+namespace
+{
+std::once_flag s_emotesInitOnce;
+}
+
 EmoteActionBase::EmoteActionBase(PlayerbotAI* botAI, std::string const name) : Action(botAI, name)
 {
-    if (emotes.empty())
-        InitEmotes();
+    std::call_once(s_emotesInitOnce, [this]() { InitEmotes(); });
 }
 
 EmoteAction::EmoteAction(PlayerbotAI* botAI) : EmoteActionBase(botAI, "emote"), Qualified() {}

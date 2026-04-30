@@ -7,28 +7,35 @@
 
 #include "Action.h"
 #include "AiObjectContext.h"
+#include <mutex>
 
 std::vector<std::string> PassiveMultiplier::allowedActions;
 std::vector<std::string> PassiveMultiplier::allowedParts;
 
+namespace
+{
+std::once_flag s_passiveAllowedActionsInitOnce;
+std::once_flag s_passiveAllowedPartsInitOnce;
+}
+
 PassiveMultiplier::PassiveMultiplier(PlayerbotAI* botAI) : Multiplier(botAI, "passive")
 {
-    if (allowedActions.empty())
+    std::call_once(s_passiveAllowedActionsInitOnce, []()
     {
         allowedActions.push_back("co");
         allowedActions.push_back("nc");
         allowedActions.push_back("reset botAI");
         allowedActions.push_back("check mount state");
         allowedActions.push_back("lfg");
-    }
+    });
 
-    if (allowedParts.empty())
+    std::call_once(s_passiveAllowedPartsInitOnce, []()
     {
         allowedParts.push_back("follow");
         allowedParts.push_back("move from group");
         allowedParts.push_back("stay");
         allowedParts.push_back("chat shortcut");
-    }
+    });
 }
 
 float PassiveMultiplier::GetValue(Action* action)

@@ -256,6 +256,11 @@ std::string& trim(std::string& s);
 
 std::set<std::string> PlayerbotAI::unsecuredCommands;
 
+namespace
+{
+std::once_flag s_unsecuredCommandsInitOnce;
+}
+
 
 void PlayerbotAI::SetSharedLosGameObjects(ObjectGuid ownerGuid, std::vector<ObjectGuid> const& gos, Player const* source)
 {
@@ -1956,7 +1961,7 @@ void PlayerbotAI::LeaveOrDisbandGroup()
 
 bool PlayerbotAI::IsAllowedCommand(std::string const text)
 {
-    if (unsecuredCommands.empty())
+    std::call_once(s_unsecuredCommandsInitOnce, []()
     {
         unsecuredCommands.insert("who");
         unsecuredCommands.insert("wts");
@@ -1966,7 +1971,7 @@ bool PlayerbotAI::IsAllowedCommand(std::string const text)
         unsecuredCommands.insert("lfg");
         unsecuredCommands.insert("pvp stats");
         unsecuredCommands.insert("rpg status");
-    }
+    });
 
     for (std::set<std::string>::iterator i = unsecuredCommands.begin(); i != unsecuredCommands.end(); ++i)
     {

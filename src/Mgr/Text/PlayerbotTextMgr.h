@@ -7,6 +7,7 @@
 #define _PLAYERBOT_PLAYERBOTTEXTMGR_H
 
 #include <map>
+#include <mutex>
 #include <vector>
 
 #include "Common.h"
@@ -103,6 +104,7 @@ private:
     std::map<std::string, std::vector<BotTextEntry>> botTexts;
     std::map<std::string, uint32> botTextChance;
     uint32 botTextLocalePriority[MAX_LOCALES];
+    mutable std::recursive_mutex lock;
 };
 
 #endif
