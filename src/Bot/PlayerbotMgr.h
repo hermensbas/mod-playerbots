@@ -6,6 +6,8 @@
 #ifndef _PLAYERBOT_PLAYERBOTMGR_H
 #define _PLAYERBOT_PLAYERBOTMGR_H
 
+#include <mutex>
+
 #include "ObjectGuid.h"
 #include "Player.h"
 #include "PlayerbotAIBase.h"
@@ -96,6 +98,7 @@ protected:
 private:
     Player* const master;
     PlayerBotErrorMap errors;
+    mutable std::mutex errorsLock;
     time_t lastErrorTell;
 };
 

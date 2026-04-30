@@ -98,6 +98,12 @@ bool EquipGlyphsAction::CollectGlyphs(std::vector<uint32> const& itemIds,
 /// -----------------------------------------------------------------
 bool EquipGlyphsAction::Execute(Event event)
 {
+    if (botAI->IsAlt())
+    {
+        botAI->TellError("You cannot use glyph equip on alt bots.");
+        return false;
+    }
+
     // 1) parse IDs
     std::vector<uint32> itemIds;
     std::istringstream iss(event.getParam());

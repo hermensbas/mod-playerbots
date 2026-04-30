@@ -2035,27 +2035,36 @@ void PlayerbotMgr::OnPlayerLogin(Player* player)
 
 void PlayerbotMgr::TellError(std::string const botName, std::string const text)
 {
-    std::set<std::string> names = errors[text];
-    if (names.find(botName) == names.end())
-    {
-        names.insert(botName);
-    }
-
-    errors[text] = names;
+    std::lock_guard<std::mutex> guard(errorsLock);
+    errors[text].insert(botName);
 }
 
 void PlayerbotMgr::CheckTellErrors(uint32 elapsed)
 {
+    PlayerBotErrorMap pendingErrors;
+    {
+        std::lock_guard<std::mutex> guard(errorsLock);
+        if (errors.empty())
+            return;
+
+        pendingErrors.swap(errors);
+    }
+
     time_t now = time(nullptr);
     if ((now - lastErrorTell) < sPlayerbotAIConfig.errorDelay / 1000)
+    {
+        std::lock_guard<std::mutex> guard(errorsLock);
+        for (auto& error : pendingErrors)
+            errors[error.first].insert(error.second.begin(), error.second.end());
         return;
+    }
 
     lastErrorTell = now;
 
-    for (PlayerBotErrorMap::iterator i = errors.begin(); i != errors.end(); ++i)
+    for (PlayerBotErrorMap::iterator i = pendingErrors.begin(); i != pendingErrors.end(); ++i)
     {
         std::string const text = i->first;
-        std::set<std::string> names = i->second;
+        std::set<std::string> const& names = i->second;
 
         std::ostringstream out;
         bool first = true;
@@ -2073,8 +2082,6 @@ void PlayerbotMgr::CheckTellErrors(uint32 elapsed)
 
         ChatHandler(master->GetSession()).PSendSysMessage(out.str().c_str());
     }
-
-    errors.clear();
 }
 
 void PlayerbotsMgr::AddPlayerbotData(Player* player, bool isBotAI)
