@@ -2561,6 +2561,8 @@ bool YoggSaronGuardianPositioningAction::Execute(Event /*event*/)
 bool YoggSaronSanityAction::Execute(Event /*event*/)
 {
     Creature* sanityWell = bot->FindNearestCreature(NPC_SANITY_WELL, 200.0f);
+    if (!sanityWell)
+        return false;
 
     return MoveTo(bot->GetMapId(), sanityWell->GetPositionX(), sanityWell->GetPositionY(), sanityWell->GetPositionZ(),
                   false, false, false, true, MovementPriority::MOVEMENT_FORCED,
