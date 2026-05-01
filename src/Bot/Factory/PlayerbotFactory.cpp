@@ -47,6 +47,8 @@ static std::vector<uint32> initSlotsOrder = {EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_
     EQUIPMENT_SLOT_LEGS, EQUIPMENT_SLOT_HANDS, EQUIPMENT_SLOT_NECK, EQUIPMENT_SLOT_BODY, EQUIPMENT_SLOT_WAIST,
     EQUIPMENT_SLOT_FEET, EQUIPMENT_SLOT_WRISTS, EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2, EQUIPMENT_SLOT_BACK};
 
+inline Item* StoreNewBoundItemInInventorySlot(Player* player, uint32 newItemId, uint32 count);
+
 uint32 PlayerbotFactory::tradeSkills[] = {SKILL_ALCHEMY,        SKILL_ENCHANTING,  SKILL_SKINNING,  SKILL_TAILORING,
                                           SKILL_LEATHERWORKING, SKILL_ENGINEERING, SKILL_HERBALISM, SKILL_MINING,
                                           SKILL_BLACKSMITHING,  SKILL_COOKING,     SKILL_FIRST_AID, SKILL_FISHING,
@@ -751,7 +753,7 @@ void PlayerbotFactory::InitConsumables()
     {
         int count = (int)item.second - (int)bot->GetItemCount(item.first);
         if (count > 0)
-            StoreItem(item.first, count);
+            StoreNewBoundItemInInventorySlot(bot, item.first, count);
     }
 }
 
@@ -2022,6 +2024,15 @@ inline Item* StoreNewItemInInventorySlot(Player* player, uint32 newItemId, uint3
     return nullptr;
 }
 
+inline Item* StoreNewBoundItemInInventorySlot(Player* player, uint32 newItemId, uint32 count)
+{
+    Item* item = StoreNewItemInInventorySlot(player, newItemId, count);
+    if (item)
+        item->SetBinding(true);
+
+    return item;
+}
+
 // void PlayerbotFactory::InitSecondEquipmentSet()
 // {
 //     if (bot->getClass() == CLASS_MAGE || bot->getClass() == CLASS_WARLOCK || bot->getClass() == CLASS_PRIEST)
@@ -2995,7 +3006,7 @@ void PlayerbotFactory::InitAmmo()
 
     if (count < maxCount)
     {
-        if (Item* newItem = StoreNewItemInInventorySlot(bot, entry, maxCount - count))
+        if (Item* newItem = StoreNewBoundItemInInventorySlot(bot, entry, maxCount - count))
         {
             newItem->AddToUpdateQueueOf(bot);
         }
@@ -3165,7 +3176,7 @@ void PlayerbotFactory::InitPotions()
             continue;
 
         uint32 maxCount = proto->GetMaxStackSize();
-        if (Item* newItem = StoreNewItemInInventorySlot(bot, itemId, urand(maxCount / 2, maxCount)))
+        if (Item* newItem = StoreNewBoundItemInInventorySlot(bot, itemId, urand(maxCount / 2, maxCount)))
             newItem->AddToUpdateQueueOf(bot);
     }
 }
@@ -3276,7 +3287,7 @@ void PlayerbotFactory::InitFood()
                 j--;
                 continue;
             }
-            StoreItem(itemId, proto->GetMaxStackSize());
+            StoreNewBoundItemInInventorySlot(bot, itemId, proto->GetMaxStackSize());
         }
     }
 }
@@ -3381,7 +3392,7 @@ void PlayerbotFactory::InitReagents()
     {
         int count = (int)item.second - (int)bot->GetItemCount(item.first);
         if (count > 0)
-            StoreItem(item.first, count);
+            StoreNewBoundItemInInventorySlot(bot, item.first, count);
     }
 }
 
