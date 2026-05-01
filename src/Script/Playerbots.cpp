@@ -278,7 +278,7 @@ public:
         PlayerbotAI* const botAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
 
         if (botAI && !botAI->IsRealPlayer() && botAI->HasActivePlayerMaster() &&
-            IsInWintergraspBattlefield(player) && !player->IsBeingTeleported())
+            IsInActiveWintergraspBattlefield(player) && !player->IsBeingTeleported())
         {
             sRandomPlayerbotMgr.RandomTeleportForLevel(player);
             return;
@@ -787,4 +787,13 @@ bool IsInWintergraspBattlefield(Player* player)
 
     Battlefield* battlefield = sBattlefieldMgr->GetBattlefieldToZoneId(player->GetZoneId());
     return battlefield && battlefield->GetBattleId() == BATTLEFIELD_BATTLEID_WG;
+}
+
+bool IsInActiveWintergraspBattlefield(Player* player)
+{
+    if (!player)
+        return false;
+
+    Battlefield* battlefield = sBattlefieldMgr->GetBattlefieldToZoneId(player->GetZoneId());
+    return battlefield && battlefield->GetBattleId() == BATTLEFIELD_BATTLEID_WG && battlefield->IsWarTime();
 }

@@ -21,6 +21,7 @@
 std::vector<std::string> split(std::string const s, char delim);
 void split(std::vector<std::string>& dest, std::string const str, char const* delim);
 bool IsInWintergraspBattlefield(Player* player);
+bool IsInActiveWintergraspBattlefield(Player* player);
 void SetBotSummonDeathCooldown(ObjectGuid guid, uint32 durationSecs);
 uint32 GetBotSummonDeathCooldownLeft(ObjectGuid guid);
 void ClearBotSummonDeathCooldown(ObjectGuid guid);

@@ -153,7 +153,7 @@ bool SummonAction::Teleport(Player* summoner, Player* player, bool preserveAuras
         return false;
 
     if (PlayerbotAI* targetBotAI = GET_PLAYERBOT_AI(player);
-        targetBotAI && !targetBotAI->IsRealPlayer() && IsInWintergraspBattlefield(summoner))
+        targetBotAI && !targetBotAI->IsRealPlayer() && IsInActiveWintergraspBattlefield(summoner))
     {
         botAI->TellError("You cannot summon non-alt bots in Wintergrasp");
         return false;

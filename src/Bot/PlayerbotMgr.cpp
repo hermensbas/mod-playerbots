@@ -1069,7 +1069,7 @@ std::string const PlayerbotHolder::ProcessBotCommand(std::string const cmd, Obje
                 return "ERROR: You can not add bots during a boss encounter.";
         }
 
-        if (master && IsInWintergraspBattlefield(master))
+        if (master && IsInActiveWintergraspBattlefield(master))
         {
             uint32 botAccountId = GetAccountId(guid);
             bool isAltBot = botAccountId && botAccountId == masterAccountId;
@@ -1452,7 +1452,7 @@ std::vector<std::string> PlayerbotHolder::HandlePlayerbotCommand(char const* arg
             }
         }
 
-        if (IsInWintergraspBattlefield(master))
+        if (IsInActiveWintergraspBattlefield(master))
         {
             messages.push_back("You cannot addclass non-alt bots in Wintergrasp");
             return messages;
