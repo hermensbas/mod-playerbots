@@ -45,6 +45,12 @@ bool ChangeTalentsAction::Execute(Event event)
             {
                 if (bot->GetSpecsCount() == 1 && bot->GetLevel() >= sWorld->getIntConfig(CONFIG_MIN_DUALSPEC_LEVEL))
                 {
+                    if (botAI->IsAlt())
+                    {
+                        botAI->TellError("I cannot learn dual specialization automatically.");
+                        return false;
+                    }
+
                     bot->CastSpell(bot, 63680, true, nullptr, nullptr, bot->GetGUID());
                     bot->CastSpell(bot, 63624, true, nullptr, nullptr, bot->GetGUID());
                 }
