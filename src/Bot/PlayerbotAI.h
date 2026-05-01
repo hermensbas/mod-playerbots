@@ -754,6 +754,15 @@ private:
     }
 protected:
     Player* ResolveMaster() const;
+    void HandleCommandImmediate(uint32 type, std::string const text, Player* fromPlayer);
+    void DrainDeferredChatCommands();
+
+    struct DeferredChatCommand
+    {
+        uint32 type = 0;
+        std::string text;
+        ObjectGuid ownerGuid;
+    };
 
     Player* bot;
     Player* master;
@@ -774,6 +783,9 @@ protected:
     std::map<std::string, time_t> whispers;
     std::pair<ChatMsg, time_t> currentChat;
     static std::set<std::string> unsecuredCommands;
+    std::list<DeferredChatCommand> deferredChatCommands_;
+    std::mutex deferredChatCommandsLock_;
+    std::atomic<bool> updatingAI_{false};
     bool allowActive[MAX_ACTIVITY_TYPE];
     time_t allowActiveCheckTimer[MAX_ACTIVITY_TYPE];
     std::atomic<bool> logoutQueued_{false};

@@ -1487,6 +1487,26 @@ void PlayerbotAI::UpdateAIGroupMaster()
     }
 }
 
+namespace
+{
+class ScopedAtomicFlag
+{
+public:
+    explicit ScopedAtomicFlag(std::atomic<bool>& flag) : _flag(flag)
+    {
+        _flag.store(true, std::memory_order_release);
+    }
+
+    ~ScopedAtomicFlag()
+    {
+        _flag.store(false, std::memory_order_release);
+    }
+
+private:
+    std::atomic<bool>& _flag;
+};
+}
+
 void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal)
 {
     if (IsLogoutQueued())
@@ -1500,6 +1520,9 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
 
     if (!bot->GetMap())
         return; // instances are created and destroyed on demand
+
+    ScopedAtomicFlag updateGuard(updatingAI_);
+    DrainDeferredChatCommands();
 
     // Non-random-account bots are always alt bots. They must never continue living
     // in the world after losing the real-player master, otherwise they can drift
@@ -1986,6 +2009,42 @@ bool PlayerbotAI::IsAllowedCommand(std::string const text)
 
 void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fromPlayer)
 {
+    if (updatingAI_.load(std::memory_order_acquire) && sMapMgr->GetMapUpdater()->activated())
+    {
+        DeferredChatCommand deferred;
+        deferred.type = type;
+        deferred.text = text;
+        if (fromPlayer)
+            deferred.ownerGuid = fromPlayer->GetGUID();
+
+        std::lock_guard<std::mutex> lock(deferredChatCommandsLock_);
+        deferredChatCommands_.push_back(std::move(deferred));
+        return;
+    }
+
+    HandleCommandImmediate(type, text, fromPlayer);
+}
+
+void PlayerbotAI::DrainDeferredChatCommands()
+{
+    std::list<DeferredChatCommand> deferredCommands;
+    {
+        std::lock_guard<std::mutex> lock(deferredChatCommandsLock_);
+        if (deferredChatCommands_.empty())
+            return;
+
+        deferredCommands.swap(deferredChatCommands_);
+    }
+
+    for (DeferredChatCommand const& deferred : deferredCommands)
+    {
+        Player* owner = deferred.ownerGuid.IsEmpty() ? nullptr : ObjectAccessor::FindPlayer(deferred.ownerGuid);
+        HandleCommandImmediate(deferred.type, deferred.text, owner);
+    }
+}
+
+void PlayerbotAI::HandleCommandImmediate(uint32 type, std::string const text, Player* fromPlayer)
+{
     if (!GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, type != CHAT_MSG_WHISPER, fromPlayer))
         return;
 
@@ -2001,7 +2060,7 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
         split(commands, text, sPlayerbotAIConfig.commandSeparator.c_str());
         for (std::vector<std::string>::iterator i = commands.begin(); i != commands.end(); ++i)
         {
-            HandleCommand(type, *i, fromPlayer);
+            HandleCommandImmediate(type, *i, fromPlayer);
         }
 
         return;
