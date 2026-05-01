@@ -3466,7 +3466,9 @@ void PlayerbotFactory::InitGlyphs(bool increment)
         botAI->GetAiObjectContext()->GetValue<bool>("custom_glyphs")->Get())
         return;   // // Added for custom Glyphs - custom glyphs flag test
 
-    if (!increment)
+    bool isAlt = botAI && botAI->IsAlt();
+
+    if (!increment && !isAlt)
     {
         for (uint32 slotIndex = 0; slotIndex < MAX_GLYPH_SLOT_INDEX; ++slotIndex)
         {
@@ -3708,9 +3710,133 @@ void PlayerbotFactory::InitGlyphs(bool increment)
     }
 
     std::unordered_set<uint32> chosen;
+    if (isAlt)
+    {
+        for (uint32 slotIndex = 0; slotIndex < MAX_GLYPH_SLOT_INDEX; ++slotIndex)
+            if (uint32 glyph = bot->GetGlyph(slotIndex))
+                chosen.insert(glyph);
+    }
+
+    auto getGlyphFromItem = [&](uint32 itemId, GlyphSlotEntry const* slotInfo) -> uint32
+    {
+        ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+        if (!proto || proto->Class != ITEM_CLASS_GLYPH)
+            return 0;
+
+        if ((proto->AllowableClass & bot->getClassMask()) == 0 || (proto->AllowableRace & bot->getRaceMask()) == 0)
+            return 0;
+
+        if (proto->RequiredLevel > bot->GetLevel())
+            return 0;
+
+        for (uint32 spell = 0; spell < MAX_ITEM_PROTO_SPELLS; spell++)
+        {
+            uint32 spellId = proto->Spells[spell].SpellId;
+            SpellInfo const* entry = sSpellMgr->GetSpellInfo(spellId);
+            if (!entry)
+                continue;
+
+            for (uint32 effect = 0; effect <= EFFECT_2; ++effect)
+            {
+                if (entry->Effects[effect].Effect != SPELL_EFFECT_APPLY_GLYPH)
+                    continue;
+
+                uint32 glyph = entry->Effects[effect].MiscValue;
+                GlyphPropertiesEntry const* glyphEntry = sGlyphPropertiesStore.LookupEntry(glyph);
+                if (glyphEntry && (!slotInfo || glyphEntry->TypeFlags == slotInfo->TypeFlags))
+                    return glyph;
+            }
+        }
+
+        return 0;
+    };
+
+    auto equipGlyphFromItem = [&](uint8 realSlot, uint32 itemId, uint32 glyph)
+    {
+        if (uint32 currentGlyph = bot->GetGlyph(realSlot))
+        {
+            if (GlyphPropertiesEntry const* currentGlyphEntry = sGlyphPropertiesStore.LookupEntry(currentGlyph))
+                bot->RemoveAurasDueToSpell(currentGlyphEntry->SpellId);
+
+            bot->SetGlyph(realSlot, 0, true);
+        }
+
+        GlyphPropertiesEntry const* glyphEntry = sGlyphPropertiesStore.LookupEntry(glyph);
+        bot->CastSpell(bot, glyphEntry->SpellId,
+                       TriggerCastFlags(TRIGGERED_FULL_MASK &
+                                        ~(TRIGGERED_IGNORE_SHAPESHIFT | TRIGGERED_IGNORE_CASTER_AURASTATE)));
+        bot->SetGlyph(realSlot, glyph, true);
+        bot->DestroyItemCount(itemId, 1, true);
+    };
+
     for (uint32 slotIndex = 0; slotIndex < maxSlot; ++slotIndex)
     {
         uint8 realSlot = glyphOrder[slotIndex];
+        if (isAlt)
+        {
+            uint32 slot = bot->GetGlyphSlot(realSlot);
+            GlyphSlotEntry const* gs = sGlyphSlotStore.LookupEntry(slot);
+            if (!gs)
+                continue;
+
+            uint32 currentGlyph = bot->GetGlyph(realSlot);
+            if (currentGlyph)
+                chosen.erase(currentGlyph);
+
+            uint32 itemId = 0;
+            uint32 glyph = 0;
+
+            if (sPlayerbotAIConfig.parsedSpecGlyph[cls][tab].size() > slotIndex &&
+                sPlayerbotAIConfig.parsedSpecGlyph[cls][tab][slotIndex] != 0)
+            {
+                uint32 premadeItemId = sPlayerbotAIConfig.parsedSpecGlyph[cls][tab][slotIndex];
+                uint32 premadeGlyph = getGlyphFromItem(premadeItemId, gs);
+                if (premadeGlyph && chosen.find(premadeGlyph) == chosen.end() && bot->GetItemCount(premadeItemId, false) > 0)
+                {
+                    itemId = premadeItemId;
+                    glyph = premadeGlyph;
+                }
+            }
+
+            if (!glyph)
+            {
+                for (ItemTemplateContainer::const_iterator i = itemTemplates->begin(); i != itemTemplates->end(); ++i)
+                {
+                    uint32 fallbackItemId = i->first;
+                    uint32 fallbackGlyph = getGlyphFromItem(fallbackItemId, gs);
+                    if (!fallbackGlyph || chosen.find(fallbackGlyph) != chosen.end() ||
+                        bot->GetItemCount(fallbackItemId, false) == 0)
+                        continue;
+
+                    itemId = fallbackItemId;
+                    glyph = fallbackGlyph;
+                    break;
+                }
+            }
+
+            if (!glyph)
+            {
+                if (currentGlyph)
+                {
+                    chosen.insert(currentGlyph);
+                    continue;
+                }
+
+                botAI->TellMaster("I need a compatible glyph in my bags to equip this glyph slot.");
+                continue;
+            }
+
+            if (currentGlyph == glyph)
+            {
+                chosen.insert(glyph);
+                continue;
+            }
+
+            equipGlyphFromItem(realSlot, itemId, glyph);
+            chosen.insert(glyph);
+            continue;
+        }
+
         if (bot->GetGlyph(realSlot))
         {
             continue;
