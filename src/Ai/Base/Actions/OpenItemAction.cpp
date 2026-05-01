@@ -26,16 +26,19 @@ bool OpenItemAction::Execute(Event /*event*/)
 
 void OpenItemAction::OpenItem(Item* item, uint8 bag, uint8 slot)
 {
+    ObjectGuid itemGuid = item->GetGUID();
+    std::string const itemName = item->GetTemplate() ? item->GetTemplate()->Name1 : "unknown";
+
     WorldPacket packet(CMSG_OPEN_ITEM);
     packet << bag << slot;
     bot->GetSession()->HandleOpenItemOpcode(packet);
 
     // Store the item GUID as the loot target
     LootObject lootObject;
-    lootObject.guid = item->GetGUID();
+    lootObject.guid = itemGuid;
     botAI->GetAiObjectContext()->GetValue<LootObject>("loot target")->Set(lootObject);
 
     std::ostringstream out;
-    out << "Opened item: " << item->GetTemplate()->Name1;
+    out << "Opened item: " << itemName;
     botAI->TellMaster(out.str());
 }
