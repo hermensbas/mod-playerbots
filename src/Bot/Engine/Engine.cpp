@@ -159,7 +159,8 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
 
     while (++iterations <= iterationsPerTick)
     {
-        basket = queue.Peek();
+        std::unique_ptr<ActionBasket> ownedBasket(queue.PopBasket());
+        basket = ownedBasket.get();
         if (!basket)
             break;
 
@@ -170,11 +171,11 @@ bool Engine::DoNextAction(Unit* unit, uint32 depth, bool minimal)
             break;  // Queue is max-relevance; nothing else will meet the minimal threshold.
 
         Event event = basket->getEvent();
-        std::unique_ptr<ActionNode> actionNode(queue.Pop());  // NOTE: Pop() deletes basket and transfers ownership
+        std::unique_ptr<ActionNode> actionNode(basket->getAction());
 
         if (!actionNode)
         {
-            LOG_ERROR("playerbots", "Engine::DoNextAction: queue.Pop() returned nullptr after queue.Peek() succeeded");
+            LOG_ERROR("playerbots", "Engine::DoNextAction: queue.PopBasket() returned a basket with nullptr action");
             continue;
         }
 

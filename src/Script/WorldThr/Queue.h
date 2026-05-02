@@ -6,6 +6,8 @@
 #ifndef PLAYERBOT_QUEUE_H
 #define PLAYERBOT_QUEUE_H
 
+#include <mutex>
+
 #include "Action.h"
 #include "Common.h"
 
@@ -40,6 +42,14 @@ public:
      * The associated ActionBasket is deleted.
      */
     ActionNode* Pop();
+
+    /**
+     * @brief Removes and returns the highest relevance basket
+     * @return Pointer to the highest relevance ActionBasket, or nullptr if queue is empty
+     *
+     * Ownership of the returned ActionBasket is transferred to the caller.
+     */
+    ActionBasket* PopBasket();
 
     /**
      * @brief Returns the action with highest relevance without removing it
@@ -89,6 +99,7 @@ private:
     void removeAndDeleteBaskets(std::list<ActionBasket*>& basketsToRemove);
 
     std::list<ActionBasket*> actions; /**< Container for action baskets */
+    mutable std::recursive_mutex actionsLock_;
 };
 
 #endif

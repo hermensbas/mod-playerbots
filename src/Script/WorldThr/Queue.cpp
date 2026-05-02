@@ -3,6 +3,8 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include <memory>
+
 #include "Queue.h"
 #include "AiObjectContext.h"
 #include "Log.h"
@@ -10,6 +12,8 @@
 
 void Queue::Push(ActionBasket* action)
 {
+    std::lock_guard<std::recursive_mutex> lock(actionsLock_);
+
     if (!action)
     {
         return;
@@ -29,27 +33,52 @@ void Queue::Push(ActionBasket* action)
 
 ActionNode* Queue::Pop()
 {
+    std::unique_ptr<ActionBasket> basket(PopBasket());
+    if (!basket)
+    {
+        return nullptr;
+    }
+
+    return basket->getAction();
+}
+
+ActionBasket* Queue::PopBasket()
+{
+    std::lock_guard<std::recursive_mutex> lock(actionsLock_);
+
     ActionBasket* highestRelevanceBasket = findHighestRelevanceBasket();
     if (!highestRelevanceBasket)
     {
         return nullptr;
     }
 
-    return extractAndDeleteBasket(highestRelevanceBasket);
+    auto itr = std::find(actions.begin(), actions.end(), highestRelevanceBasket);
+    if (itr == actions.end())
+    {
+        LOG_ERROR("playerbots", "Queue::PopBasket called for a basket that is no longer in the queue");
+        return nullptr;
+    }
+
+    actions.erase(itr);
+    return highestRelevanceBasket;
 }
 
 ActionBasket* Queue::Peek()
 {
+    std::lock_guard<std::recursive_mutex> lock(actionsLock_);
     return findHighestRelevanceBasket();
 }
 
 uint32 Queue::Size()
 {
+    std::lock_guard<std::recursive_mutex> lock(actionsLock_);
     return actions.size();
 }
 
 void Queue::RemoveExpired()
 {
+    std::lock_guard<std::recursive_mutex> lock(actionsLock_);
+
     if (!sPlayerbotAIConfig.expireActionTime)
     {
         return;
@@ -105,6 +134,8 @@ ActionBasket* Queue::findHighestRelevanceBasket() const
 
 ActionNode* Queue::extractAndDeleteBasket(ActionBasket* basket)
 {
+    std::lock_guard<std::recursive_mutex> lock(actionsLock_);
+
     if (!basket)
         return nullptr;
 
