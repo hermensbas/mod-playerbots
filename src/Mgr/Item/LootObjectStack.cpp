@@ -412,6 +412,13 @@ bool LootObject::IsLootPossible(Player* bot)
 
 bool LootObjectStack::Add(ObjectGuid guid)
 {
+    // expire old completed entries so a despawn/respawn with a reused
+    // guid can still be looted later
+    completedLoot.shrink(time(nullptr) - 300);
+
+    if (completedLoot.find(guid) != completedLoot.end())
+        return false;
+
     if (availableLoot.size() >= MAX_LOOT_OBJECT_COUNT)
     {
         availableLoot.shrink(time(nullptr) - 30);
@@ -444,9 +451,16 @@ void LootObjectStack::Remove(ObjectGuid guid)
         availableLoot.erase(i);
 }
 
+void LootObjectStack::MarkCompleted(ObjectGuid guid)
+{
+    Remove(guid);
+    completedLoot.insert(guid);
+}
+
 void LootObjectStack::Clear()
 {
     availableLoot.clear();
+    completedLoot.clear();
     CancelLoot(_pendingLoot);
 }
 

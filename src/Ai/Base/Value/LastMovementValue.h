@@ -40,6 +40,7 @@ public:
         lastPath = other.lastPath;
         nextTeleport = other.nextTeleport;
         priority = other.priority;
+        lastTransportEntry = other.lastTransportEntry;
         return *this;
     };
 
@@ -68,6 +69,9 @@ public:
     TravelPath lastPath;
     time_t nextTeleport;
     std::future<TravelPath> future;
+    // Entry of the transport the bot is mid-journey on; used by the
+    // cross-continent transport leg to resume boarding/disembarking.
+    uint32 lastTransportEntry = 0;
 };
 
 class LastMovementValue : public ManualSetValue<LastMovement&>

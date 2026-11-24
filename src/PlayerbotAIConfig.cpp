@@ -92,7 +92,6 @@ bool PlayerbotAIConfig::Initialize()
     GlobalCoolDown = sConfigMgr->GetOption<int32>("Playerbots.GlobalCooldown", 500);
     MaxWaitForMove = sConfigMgr->GetOption<int32>("Playerbots.MaxWaitForMove", 5000);
     DisableMoveSplinePath = sConfigMgr->GetOption<int32>("Playerbots.DisableMoveSplinePath", 0);
-    MaxMovementSearchTime = sConfigMgr->GetOption<int32>("Playerbots.MaxMovementSearchTime", 3);
     ExpireActionTime = sConfigMgr->GetOption<int32>("Playerbots.ExpireActionTime", 5000);
     DispelAuraDuration = sConfigMgr->GetOption<int32>("Playerbots.DispelAuraDuration", 700);
     ReactDelay = sConfigMgr->GetOption<int32>("Playerbots.ReactDelay", 100);
@@ -116,14 +115,39 @@ bool PlayerbotAIConfig::Initialize()
     FleeDistance = sConfigMgr->GetOption<float>("Playerbots.FleeDistance", 5.0f);
     AggroDistance = sConfigMgr->GetOption<float>("Playerbots.AggroDistance", 22.0f);
     TooCloseDistance = sConfigMgr->GetOption<float>("Playerbots.TooCloseDistance", 5.0f);
+    TransportTeleportType = sConfigMgr->GetOption<uint32>("Playerbots.TransportTeleportType", 2);
     MeleeDistance = sConfigMgr->GetOption<float>("Playerbots.MeleeDistance", 0.75f);
     FollowDistance = sConfigMgr->GetOption<float>("Playerbots.FollowDistance", 1.5f);
+    WalkDistance = sConfigMgr->GetOption<float>("Playerbots.WalkDistance", 5.0f);
     WhisperDistance = sConfigMgr->GetOption<float>("Playerbots.WhisperDistance", 6000.0f);
     ContactDistance = sConfigMgr->GetOption<float>("Playerbots.ContactDistance", 0.45f);
     AoeRadius = sConfigMgr->GetOption<float>("Playerbots.AoeRadius", 10.0f);
     RpgDistance = sConfigMgr->GetOption<float>("Playerbots.RpgDistance", 200.0f);
     GrindDistance = sConfigMgr->GetOption<float>("Playerbots.GrindDistance", 75.0f);
+    // Free-move leash (port of cmangos free-move-range): the radius a bot
+    // may range from its anchor (itself when solo/wandering, its master
+    // when following) to SELECT a grind/attack target. Stops a bot striking
+    // out past nearer mobs toward a distant one or a far camp. 0 disables.
+    WanderMaxDistance = sConfigMgr->GetOption<float>("Playerbots.WanderMaxDistance", 50.0f);
+    GuardDistance = sConfigMgr->GetOption<float>("Playerbots.GuardDistance", SightDistance);
     ReactDistance = sConfigMgr->GetOption<float>("Playerbots.ReactDistance", 150.0f);
+    // Steep-slope travel policy. The core bot nav filter hard-excludes
+    // 50-60deg NAV_GROUND_STEEP and cannot re-include it (no
+    // SetIncludeFlags), so a bot wedges when the ONLY route to a target
+    // runs along such a slope (a mountain edge leading to a ledge NPC).
+    // When a bot's travel path finds NO route, it retries through a temp
+    // creature (whose filter DOES include steep) at this Detour area
+    // cost, so the bot follows the steep edge as a last resort. A high
+    // value keeps bots off steep whenever any flatter route exists; the
+    // >60deg cliff has no navmesh so the top stays uncrossable. Set 0 to
+    // restore strict hard-exclude (bots never touch steep, but wedge at
+    // such targets). Travel pathing only; combat is unchanged.
+    // 100: a steep yard costs as much as 100 flat yards, so any existing
+    // way around always beats crossing a ridge; steep is used only when
+    // NO flat route exists at all (a ledge NPC's approach). 20 proved too
+    // low — a short steep crossing could out-score a long flat detour and
+    // bots cut over mountains again.
+    BotSteepTravelCost = sConfigMgr->GetOption<float>("Playerbots.BotSteepTravelCost", 100.0f);
 
     CriticalHealth = sConfigMgr->GetOption<int32>("Playerbots.CriticalHealth", 25);
     LowHealth = sConfigMgr->GetOption<int32>("Playerbots.LowHealth", 45);

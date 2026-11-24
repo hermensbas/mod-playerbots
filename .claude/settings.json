@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '-F[\\(\\),]' ' *)",
+      "Bash(xargs ls -lah)",
+      "Bash(py --version)",
+      "Bash(py -3 --version)",
+      "Bash(py scripts/import_cmangos_travel_nodes.py)",
+      "Read(//home/dev/azerothcore_installer/_server/azerothcore/modules/mod-playerbots/data/sql/playerbots/updates/**)",
+      "Bash(py scripts/fixup_id_collision.py)",
+      "Bash(py scripts/insert_ignore.py)",
+      "Bash(grep -nA 6 \"passFilter\" C:/Users/Admin/git/main/azerothcore-wotlk/deps/recastnavigation/Detour/Include/DetourNavMeshQuery.h)",
+      "Bash(grep -nA 5 \"dtQueryFilter::passFilter\" C:/Users/Admin/git/main/azerothcore-wotlk/deps/recastnavigation/Detour/Source/DetourNavMeshQuery.cpp)",
+      "Bash(grep -nB1 -A2 \"modAlmostUnwalkableTriangles\" C:/Users/Admin/git/main/azerothcore-wotlk/src/tools/mmaps_generator/MapBuilder.cpp)",
+      "Bash(xargs grep -l \"MoveFarTo\\\\|ResolveMovePath\\\\|DispatchMovement\")",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" status)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" add src/server/game/Movement/MovementGenerators/PathGenerator.h)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" commit -m \"feat\\(Core/Movement\\): Expose dtQueryFilter::setAreaCost via PathGenerator\")",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" push)",
+      "Bash(wait)",
+      "Bash(git -C \"c:/Users/Admin/git/main/azerothcore-wotlk/modules/mod-playerbots\" show 3710c35a)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" show 9cccc5d26)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" add src/server/game/Movement/MovementGenerators/PathGenerator.cpp)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" commit -m \"feat\\(Core/Movement\\): Bias NAV_WATER 10x in default Player path filter\")",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" commit -m \"Revert \\\\\"feat\\(Core/Movement\\): Bias NAV_WATER 10x in default Player path filter\\\\\"\")",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" commit -m \"Revert \\\\\"feat\\(Core/Movement\\): Expose dtQueryFilter::setAreaCost via PathGenerator\\\\\"\")",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" log --oneline cf9c6e9f3353d386f398cbe7a821abfd8fe9a4b3..HEAD)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" diff cf9c6e9f3353d386f398cbe7a821abfd8fe9a4b3..HEAD --stat)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" reset --hard cf9c6e9f3353d386f398cbe7a821abfd8fe9a4b3)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" push --force-with-lease)",
+      "Bash(git cherry-pick *)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" status -s)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" diff --stat)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" add src/server/game/Movement/MovementGenerators/PathGenerator.cpp src/server/game/Movement/MovementGenerators/PathGenerator.h)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" commit -m \"feat\\(Core/Movement\\): Cap Player path filter at 50° + water bias under MOD_PLAYERBOTS\")",
+      "Bash(grep -n \"CollectIncludeDirectories\\\\|sourcePath\\\\|GLOB.*\\\\\\\\.cpp\\\\\\\\|target_include\" C:/Users/Admin/git/main/azerothcore-wotlk/modules/CMakeLists.txt)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" commit -m \"fix\\(Core/Movement\\): Gate playerbot path filter on WorldSession::IsBot\\(\\)\")",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" fetch origin fix/mmaps-config-overrides-and-aliases)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" log --oneline HEAD..origin/fix/mmaps-config-overrides-and-aliases)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" rebase origin/fix/mmaps-config-overrides-and-aliases)",
+      "Bash(git -C \"C:/Users/Admin/git/main/azerothcore-wotlk\" log --oneline -3)",
+      "Bash(grep -v \"//\")",
+      "Bash(grep -v \"^//\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Admin\\git\\main\\azerothcore-wotlk\\src\\common\\Collision\\Maps",
+      "C:\\Users\\Admin\\git\\main\\azerothcore-wotlk\\src\\tools\\mmaps_generator",
+      "C:\\Users\\Admin\\git\\main\\azerothcore-wotlk\\src\\server\\game\\Movement\\MovementGenerators"
+    ]
+  }
+}

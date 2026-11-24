@@ -179,8 +179,14 @@ bool PossibleNewRpgTargetsValue::AcceptUnit(Unit* unit)
     return false;
 }
 
+// questgivers for accept/turn-in; rest for quest progression
+// (chests, runes, altars, moonwells, lily piles, …)
 const std::vector<GameobjectTypes> PossibleNewRpgGameObjectsValue::allowedGOFlags = {
     GAMEOBJECT_TYPE_QUESTGIVER,
+    GAMEOBJECT_TYPE_CHEST,
+    GAMEOBJECT_TYPE_GOOBER,
+    GAMEOBJECT_TYPE_SPELL_FOCUS,
+    GAMEOBJECT_TYPE_GENERIC,
 };
 
 GuidVector PossibleNewRpgGameObjectsValue::Calculate()

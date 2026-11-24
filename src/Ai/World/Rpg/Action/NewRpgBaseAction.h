@@ -38,6 +38,7 @@ protected:
     bool MoveWorldObjectTo(ObjectGuid guid, float distance = INTERACTION_DISTANCE);
     bool MoveRandomNear(float moveStep = 50.0f, MovementPriority priority = MovementPriority::MOVEMENT_NORMAL, WorldObject* center = nullptr);
     bool ForceToWait(uint32 duration, MovementPriority priority = MovementPriority::MOVEMENT_NORMAL);
+    bool TakeFlight(std::vector<uint32> const& taxiNodes, Creature* flightMaster);
 
     /* QUEST RELATED CHECK */
     bool InteractWithNpcOrGameObjectForQuest(ObjectGuid guid);
@@ -50,8 +51,44 @@ protected:
     bool TurnInQuest(Quest const* quest, ObjectGuid guid);
     bool OrganizeQuestLog();
 
+    /* QUEST PROGRESSION HELPERS (at POI) */
+    // Walk to a GO that drops a needed quest item. The loot strategy
+    // opens and loots it once in range.
+    bool TryLootQuestGO(ObjectGuid& pursuedGO, float searchRange = 60.0f);
+
+    // Walk to / use a GO that is itself the objective (rune, lever,
+    // altar, coffin — RequiredNpcOrGo with a negative entry).
+    bool TryUseQuestGO(ObjectGuid& pursuedGO, float searchRange = 60.0f);
+
+    // Fire a quest item's OnUse spell at the right target: a spell-focus
+    // GO (moonwell), a required creature, or the bot itself.
+    bool TryUseQuestItem(ObjectGuid& pursuedGO, ObjectGuid& pursuedTarget, float searchRange = 60.0f);
+
+    // True when a quest-relevant mob is within range — used during
+    // travel so we yield to attack-anything instead of running past.
+    bool HasNearbyQuestMob(float range = 20.0f);
+
+    // The nearest quest-relevant mob (kill credit or needed item drop)
+    // within range, else nullptr. Lets the gather roam head toward mobs
+    // in sight instead of camping for local respawns.
+    Creature* NearestQuestMob(float range = 20.0f);
+
 protected:
+    // Last object the approach failed to path to, skipped by the pickers
+    // for a short while so the bot tries an ALTERNATIVE (the next
+    // mushroom over) instead of re-committing the same unreachable one
+    // every tick forever.
+    ObjectGuid lastUnreachableGO{};
+    uint32 lastUnreachableGOMs{0};
+
+    void MarkUnreachable(ObjectGuid guid);
+    bool IsMarkedUnreachable(ObjectGuid guid) const;
+
     bool GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector<POIInfo>& poiInfo, bool toComplete = false);
+    float ResolveQuestPOIDestZ(Quest const* quest, int32 objectiveIdx, float dx, float dy, float surfaceZ);
+    float ResolveQuestTurnInDestZ(uint32 questId, float dx, float dy, float surfaceZ);
+    float NearestQuestSpawnZ(std::vector<uint32> const& creatureEntries, std::vector<uint32> const& goEntries,
+                             float dx, float dy, float surfaceZ);
     static WorldPosition SelectRandomGrindPos(Player* bot);
     static WorldPosition SelectRandomCampPos(Player* bot);
     bool SelectRandomFlightTaxiNode(uint32& flightMasterEntry, WorldPosition& flightMasterPos, std::vector<uint32>& path);
@@ -59,17 +96,6 @@ protected:
     bool CheckRpgStatusAvailable(NewRpgStatus status);
 
 protected:
-    /* FOR MOVE FAR */
-    const float pathFinderDis = 70.0f;
-    // Time without real progress toward dest before MoveFarTo
-    // falls back to teleport recovery. Kept short enough that a
-    // bot truly oscillating around an unreachable destination
-    // (mmap returning non-progressing partial paths, or NOPATH +
-    // cone fallback wandering) doesn't spin for 5 minutes before
-    // the teleport fires, but long enough that a genuine long
-    // walk that is slowly making progress never triggers it.
-    const uint32 stuckTime = 90 * IN_MILLISECONDS;
-
     /* FOR QUEST GIVER */
     // Time on one giver, walking and interacting, after which it is skipped until the next IDLE.
     const uint32 questGiverGiveUpTime = 60 * IN_MILLISECONDS;

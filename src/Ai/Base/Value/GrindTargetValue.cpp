@@ -11,6 +11,36 @@
 #include "ServerFacade.h"
 #include "SharedDefines.h"
 
+// Free-move leash — functional port of cmangos CanFreeMoveValue::CanFreeTarget.
+// A bot may only SELECT a grind/attack target within its free-move range of
+// its anchor: its master when following (so it stays with the group), else
+// itself with a wander radius (WanderMaxDistance). This stops a bot striking
+// out past nearer hostiles toward a distant mob or a far camp. Range 0 (or in
+// a battleground) disables the leash.
+static bool CanFreeTarget(PlayerbotAI* botAI, Player* bot, Unit* unit)
+{
+    if (!unit || bot->InBattleground())
+        return true;
+
+    Unit* anchor = bot;
+    float range = sPlayerbotAIConfig.WanderMaxDistance;
+
+    if (Player* master = botAI->GetMaster())
+    {
+        if (master != bot && master->IsInWorld() && master->GetMapId() == bot->GetMapId() &&
+            botAI->HasStrategy("follow", BotState::BOT_STATE_NON_COMBAT))
+        {
+            anchor = master;
+            range = sPlayerbotAIConfig.FollowDistance + sPlayerbotAIConfig.WanderMaxDistance;
+        }
+    }
+
+    if (range <= 0.0f)
+        return true;
+
+    return anchor->GetDistance(unit) < range;
+}
+
 Unit* GrindTargetValue::Calculate()
 {
     uint32 memberCount = 1;
@@ -37,15 +67,34 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
                    !GET_PLAYERBOT_AI(master)))
         master = nullptr;
 
+    // Engage the CLOSEST attacker first, not an arbitrary one. The
+    // "attackers" list is hash-ordered (unordered_set), so returning the
+    // first alive entry picks a random mob — the bot then walks toward it,
+    // possibly the farthest, straight past nearer hostiles into the middle
+    // of the pack. Picking the nearest makes it fight outside-in and work
+    // inward as each falls.
     GuidVector attackers = context->GetValue<GuidVector>("attackers")->Get();
+    Unit* closestAttacker = nullptr;
+    float closestDist = 0.0f;
     for (ObjectGuid const guid : attackers)
     {
         Unit* unit = botAI->GetUnit(guid);
         if (!unit || !unit->IsAlive())
             continue;
 
-        return unit;
+        // Don't get dragged past the leash chasing a far attacker.
+        if (!CanFreeTarget(botAI, bot, unit))
+            continue;
+
+        float const dist = bot->GetDistance(unit);
+        if (!closestAttacker || dist < closestDist)
+        {
+            closestDist = dist;
+            closestAttacker = unit;
+        }
     }
+    if (closestAttacker)
+        return closestAttacker;
 
     GuidVector targets = *context->GetValue<GuidVector>("possible targets");
     if (targets.empty())
@@ -105,19 +154,43 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
             continue;
         }
 
+        // Free-move leash: don't select a mob outside the wander radius of
+        // our anchor — striking out to a distant one paths us past nearer
+        // hostiles into a camp (cmangos CanFreeTarget parity).
+        if (!CanFreeTarget(botAI, bot, unit))
+            continue;
+
         bool inactiveGrindStatus = botAI->rpgInfo.GetStatus() != RPG_WANDER_RANDOM && botAI->rpgInfo.GetStatus() != RPG_IDLE;
+        bool const doingQuest = botAI->rpgInfo.GetStatus() == RPG_DO_QUEST;
 
         float aggroRange = 30.0f;
         if (unit->ToCreature())
             aggroRange = std::min(30.0f, unit->ToCreature()->GetAggroRange(bot) + 10.0f);
         bool outOfAggro = unit->ToCreature() && bot->GetDistance(unit) > aggroRange;
-        if (inactiveGrindStatus && outOfAggro)
+
+        bool questMob = true;
+        if (inactiveGrindStatus)
         {
             if (needForQuestMap.find(unit->GetEntry()) == needForQuestMap.end())
                 needForQuestMap[unit->GetEntry()] = needForQuest(unit);
+            questMob = needForQuestMap[unit->GetEntry()];
 
-            if (!needForQuestMap[unit->GetEntry()])
-                continue;
+            if (!questMob)
+            {
+                // While working a quest, skip mobs the quest does not
+                // need almost always — at ANY distance, not just beyond
+                // aggro range. Otherwise each kill relocates the bot
+                // into the next camp mob's radius and the chain never
+                // ends. The rare pass-through keeps a camp clearable
+                // when the bot is boxed in.
+                if (doingQuest)
+                {
+                    if (urand(0, 99) < 99)
+                        continue;
+                }
+                else if (outOfAggro)
+                    continue;
+            }
         }
 
         if (group)
@@ -140,6 +213,10 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
         else
         {
             float newdistance = bot->GetDistance(unit);
+            // Prefer quest mobs while questing: a non-quest mob has to
+            // be more than 20y closer to win the pick.
+            if (doingQuest && !questMob)
+                newdistance += 20.0f;
             if (!result || (newdistance < distance))
             {
                 distance = newdistance;

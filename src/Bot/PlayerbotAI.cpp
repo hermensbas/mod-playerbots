@@ -292,10 +292,6 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
     bool isCasting = bot->IsNonMeleeSpellCast(true);
     if (bot->IsInCombat())
     {
-        // RPG move action may not run in combat, so reset its stuck timer here
-        rpgInfo.stuckTs = getMSTime();
-        rpgInfo.stuckAttempts = 0;
-
         if (!inCombat)
         {
             // "attackers" is cached for 1 s; refresh it so the assist actions see the new attacker
@@ -311,10 +307,6 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
     {
         if (inCombat && !isCasting)
             ResetActionDuration();
-
-        // after combat, measure travel progress from the current spot
-        if (inCombat)
-            rpgInfo.nearestMoveFarDis = FLT_MAX;
 
         inCombat = false;
     }
@@ -872,6 +864,21 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const& text, Player& fr
     }
 }
 
+void PlayerbotAI::TeleportTo(WorldLocation loc, bool resetAI)
+{
+    if (!bot || bot->IsBeingTeleported() || !bot->IsInWorld())
+        return;
+
+    bot->GetMotionMaster()->Clear();
+    if (resetAI)
+        Reset(true);
+    else
+        InterruptSpell();
+    bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
+    bot->TeleportTo(loc.GetMapId(), loc.GetPositionX(), loc.GetPositionY(), loc.GetPositionZ(), 0);
+    bot->SendMovementFlagUpdate();
+}
+
 void PlayerbotAI::HandleTeleportAck()
 {
     if (!bot || !bot->GetSession())
@@ -914,7 +921,7 @@ void PlayerbotAI::HandleTeleportAck()
             bot->StopMoving();
         }
 
-        // simulate far teleport latency (cmangos-style)
+        // simulate far teleport latency
         SetNextCheckDelay(urand(2000, 5000));
         return;
     }
@@ -5579,6 +5586,15 @@ float PlayerbotAI::GetRange(std::string const type)
 
     if (type == "melee")
         return sPlayerbotAIConfig.MeleeDistance;
+
+    if (type == "wandermax")
+        return sPlayerbotAIConfig.WanderMaxDistance;
+
+    if (type == "follow")
+        return sPlayerbotAIConfig.FollowDistance;
+
+    if (type == "guard")
+        return sPlayerbotAIConfig.GuardDistance;
 
     return 0;
 }

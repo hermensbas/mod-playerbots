@@ -7,6 +7,7 @@
 #ifndef PLAYERBOTS_NEWRPGINFO_H
 #define PLAYERBOTS_NEWRPGINFO_H
 
+#include <deque>
 #include <unordered_set>
 
 #include "Define.h"
@@ -16,6 +17,7 @@
 #include "Strategy.h"
 #include "Timer.h"
 #include "TravelMgr.h"
+#include "TravelNode.h"
 
 #include <array>
 #include <string>
@@ -57,6 +59,11 @@ struct NewRpgInfo
         int32 objectiveIdx{0};
         WorldPosition pos{};
         uint32 lastReachPOI{0};
+        // committed target per objective type. stops zig-zagging in
+        // dense spawn clusters when "nearest" would flip each tick.
+        ObjectGuid pursuedLootGO{};      // GOs we loot (lilies, eggs)
+        ObjectGuid pursuedUseGO{};       // GOs we click or focus on
+        ObjectGuid pursuedUseTarget{};   // creature we apply an item to
     };
     // RPG_TRAVEL_FLIGHT
     struct TravelFlight
@@ -92,12 +99,10 @@ struct NewRpgInfo
 
     uint32 startT{0};  // start timestamp of the current status
 
-    // MOVE_FAR
-    float nearestMoveFarDis{FLT_MAX};
-    uint32 stuckTs{0};
-    uint32 stuckAttempts{0};
-    WorldPosition moveFarPos;
-    // END MOVE_FAR
+    // Travel Node System
+    TravelPlan travelPlan;
+    bool HasActiveTravelPlan() const { return travelPlan.IsActive(); }
+    void ClearTravel() { travelPlan.Reset(); }
 
     // QUEST GIVER
     ObjectGuid questGiver;  // giver the bot is walking to or talking with
@@ -135,7 +140,6 @@ struct NewRpgInfo
     void ChangeToIdle();
     bool CanChangeTo(NewRpgStatus status);
     void Reset();
-    void SetMoveFarTo(WorldPosition pos);
     std::string ToString();
 };
 

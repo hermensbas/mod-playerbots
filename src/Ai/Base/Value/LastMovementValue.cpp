@@ -14,16 +14,17 @@ LastMovement::LastMovement(LastMovement& other)
       taxiMaster(other.taxiMaster),
       lastFollow(other.lastFollow),
       lastAreaTrigger(other.lastAreaTrigger),
-      lastFlee(other.lastFlee),
       lastMoveToX(other.lastMoveToX),
       lastMoveToY(other.lastMoveToY),
       lastMoveToZ(other.lastMoveToZ),
-      lastMoveToOri(other.lastMoveToOri)
+      lastMoveToOri(other.lastMoveToOri),
+      lastFlee(other.lastFlee)
 {
     lastMoveShort = other.lastMoveShort;
     nextTeleport = other.nextTeleport;
     lastPath = other.lastPath;
     priority = other.priority;
+    lastTransportEntry = other.lastTransportEntry;
 }
 
 void LastMovement::clear()
@@ -42,6 +43,7 @@ void LastMovement::clear()
     msTime = 0;
     lastdelayTime = 0;
     priority = MovementPriority::MOVEMENT_NORMAL;
+    lastTransportEntry = 0;
 }
 
 void LastMovement::Set(Unit* follow)

@@ -104,6 +104,7 @@ public:
 
     bool Add(ObjectGuid guid);
     void Remove(ObjectGuid guid);
+    void MarkCompleted(ObjectGuid guid);
     void Clear();
     LootObject GetLoot(float maxDistance = 0);
 
@@ -123,6 +124,9 @@ private:
     ObjectGuid _pendingLoot;
     std::chrono::steady_clock::time_point _pendingUntil;
     bool _awaitingRelease = false;
+    // Guids we already opened loot on; blocks "add all loot" from
+    // re-adding the same corpse before it despawns.
+    LootTargetList completedLoot;
 };
 
 #endif

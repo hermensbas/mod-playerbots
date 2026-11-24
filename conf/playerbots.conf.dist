@@ -376,10 +376,6 @@ Playerbots.MaxWaitForMove = 5000
 #          2 - MoveSplinePath disabled everywhere
 Playerbots.DisableMoveSplinePath = 0
 
-# Max search time for movement (higher for better movement on slopes)
-# Default: 3
-Playerbots.MaxMovementSearchTime = 3
-
 # Action expiration time
 Playerbots.ExpireActionTime = 5000
 
@@ -431,7 +427,33 @@ Playerbots.ContactDistance = 0.45
 Playerbots.AoeRadius = 10
 Playerbots.RpgDistance = 200
 Playerbots.GrindDistance = 75.0
+
+#
+#    Playerbots.WanderMaxDistance
+#        Free-move leash: how far (yards) a bot may range from its anchor to
+#        SELECT a grind/attack target. Anchor is the bot itself when solo, or
+#        its master when following. Keeps a bot from striking out past nearer
+#        mobs toward a distant one / into a far camp. 0 disables the leash.
+#        Default: 50.0
+Playerbots.WanderMaxDistance = 50.0
+
+#
+#    Playerbots.GuardDistance
+#        Free-move leash radius while on a guard position. Default: SightDistance.
+Playerbots.GuardDistance = 100.0
 Playerbots.ReactDistance = 150.0
+
+#
+#    Playerbots.BotSteepTravelCost
+#        Detour traversal cost for 50-60deg NAV_GROUND_STEEP slopes when a bot's
+#        travel path can find NO flatter route (e.g. a mountain edge leading to a
+#        ledge NPC). The bot then follows the steep edge as a last resort instead
+#        of wedging. At 100, one steep yard costs as much as 100 flat yards, so
+#        any existing way around always beats crossing a ridge.
+#        0 = strict hard-exclude (bots never touch steep, but stall at such targets).
+#        The >60deg cliff has no navmesh, so the top is never crossable either way.
+#        Default: 100.0
+Playerbots.BotSteepTravelCost = 100.0
 
 #
 #
@@ -1443,6 +1465,12 @@ Playerbots.RpgTargetSearchDistance = 150.0
 # ".playerbots rndbot questdump". Adds per-bot maps that are cleared on every stats aggregation.
 # Default: 0 (disabled)
 Playerbots.CollectDetailedQuestStats = 0
+
+# How bots traverse transport (boat/zeppelin) legs on travel-node routes:
+#   0/1 = walk to the dock and ride the transport
+#   2   = teleport across the transport leg
+# Default: 2
+Playerbots.TransportTeleportType = 2
 
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.

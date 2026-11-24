@@ -49,6 +49,10 @@ void DestroyItemAction::DestroyItem(FindItemVisitor* visitor)
     std::vector<Item*> items = visitor->GetResult();
     for (Item* item : items)
     {
+        // backstop: never drop an active quest item
+        if (bot->HasQuestForItem(item->GetTemplate()->ItemId))
+            continue;
+
         std::ostringstream out;
         out << chat->FormatItem(item->GetTemplate()) << " destroyed";
         botAI->TellMaster(out);
@@ -75,18 +79,11 @@ bool SmartDestroyItemAction::Execute(Event /*event*/)
         return true;
     }
 
+    // ITEM_USAGE_QUEST is excluded — those are still-needed quest items
     std::vector<uint32> bestToDestroy = {ITEM_USAGE_NONE};  // First destroy anything useless.
 
-    if (!AI_VALUE(bool, "can sell") &&
-        AI_VALUE(
-            bool,
-            "should get money"))  // We need money so quest items are less important since they can't directly be sold.
-        bestToDestroy.push_back(ITEM_USAGE_QUEST);
-    else  // We don't need money so destroy the cheapest stuff.
-    {
-        bestToDestroy.push_back(ITEM_USAGE_VENDOR);
-        bestToDestroy.push_back(ITEM_USAGE_AH);
-    }
+    bestToDestroy.push_back(ITEM_USAGE_VENDOR);
+    bestToDestroy.push_back(ITEM_USAGE_AH);
 
     // If we still need room
     bestToDestroy.push_back(
