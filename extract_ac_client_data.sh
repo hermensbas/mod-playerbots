@@ -18,8 +18,8 @@ EXTRACT_MMAPS=true
 MMAP_THREADS=0           # 0 = auto-detect (each thread uses 1-2 GB RAM)
 MMAP_SINGLE_MAP=""       # e.g. "489" for Warsong Gulch only
 
-# Verbatim copy of azerothcore-wotlk/master:src/tools/mmaps_generator/mmaps-config.yaml
-# (also the same config the mod-playerbots fork ships).
+# Verbatim copy of mod-playerbots/azerothcore-wotlk Playerbot:src/tools/mmaps_generator/mmaps-config.yaml
+# (key names and defaults must match the core's mmaps_generator; unknown keys are silently ignored).
 MMAPS_CONFIG_YAML=$(cat <<'YAML_EOF'
 mmapsConfig:
   skipLiquid: false
@@ -32,6 +32,24 @@ mmapsConfig:
   # and is also where the "mmaps" folder will be created or located.
   dataDir: "./"
 
+  # Off-mesh connections define manual navigation links that are not part of the generated navmesh.
+  # They are used to connect two arbitrary points in the world where normal pathfinding cannot reach,
+  # such as jumps, ropes, ladders, teleports, elevators, or special scripted movement paths.
+  #
+  # Format:
+  #   mapID tileX,tileY (start_x start_y start_z) (end_x end_y end_z) size
+  #
+  # Fields:
+  #   mapID      - Map identifier where this connection exists.
+  #   tileX,tileY- Navmesh tile coordinates the connection belongs to.
+  #   start      - World position where the connection begins.
+  #   end        - World position where the connection ends.
+  #   size       - Effective radius of the connection (agent clearance / usability width).
+  offmeshConnections:
+    # Make Blades Edge Arena Ropes wider
+    - "562 31,20 (6234.474121 256.563721 11.063726) (6230.162598 251.681976 11.199670) 2.1"
+    - "562 31,20 (6242.273926 266.697540 11.090456) (6246.688965 272.064819 11.235604) 2.1"
+
   meshSettings:
     # Here we have global config for recast navigation.
     # It's possible to override these data on map or tile level (see mapsOverrides).
@@ -43,32 +61,25 @@ mmapsConfig:
     # --- Cell Size Calculation ---
     # Many parameters below are defined in "cell units".
     # In RecastDemo, you often work with world units instead of cell units.
-    # The actual generator uses (src/tools/mmaps_generator/Config.cpp:28):
+    # By default, these cell units are converted to world units using the formula:
     #
-    #     cellSize = MMAP::GRID_SIZE / vertexPerMapEdge
+    #     cellSize = MMAP::GRID_SIZE / (verticesPerMapEdge - 1)
     #
     # Where:
     #     MMAP::GRID_SIZE = 533.3333f (the size of one map tile in world units)
-    #     vertexPerMapEdge = number of vertices along one edge of the full map grid
+    #     verticesPerMapEdge = number of vertices along one edge of the full map grid
     #
-    # Example (AC stock):
-    #     vertexPerMapEdge = 2000 → cellSize ≈ 533.3333 / 2000 ≈ 0.2667 yd
-    #
-    # IMPORTANT: when changing vertexPerMapEdge, the per-cell parameters
-    # below (walkableHeight, walkableClimb, walkableRadius) must be re-scaled
-    # to preserve their world-unit semantics. Doubling vertexPerMapEdge
-    # halves cellSize, so cell counts must double to keep the same yd value.
+    # Example:
+    #     If verticesPerMapEdge = 2000, then:
+    #         cellSize ≈ 533.3333 / (2000 - 1) ≈ 0.2667 world units per cell
     #
     # To convert a value from cell units to world units (e.g., walkableClimb),
-    # multiply by cellSize. For example, a walkableClimb of 6 at 2000 resolution:
-    #     6 × 0.2667 ≈ 1.60 yd
+    # multiply by cellSize. For example, a walkableClimb of 6 corresponds to:
+    #     6 * 0.2667 ≈ 1.6 world units
 
     # Minimum ceiling height (in cell units) NPCs need to pass under an obstacle.
     # Controls how much vertical clearance is required.
     # To convert to world units, multiply by cellSize (see "Cell Size Calculation").
-    # 6 cells × 0.2667 yd ≈ 1.60 yd — matches WoW player capsule height at
-    # 2000 resolution (AC stock). Preserves the 1.60 yd world-unit
-    # ceiling-clearance requirement.
     walkableHeight: 6
 
     # Maximum height difference (in cell units) NPCs can step up or down.
@@ -77,42 +88,25 @@ mmapsConfig:
     #
     # Vanilla WotLK uses 6, which allows creatures to "jump" over fences.
     # Classic WotLK uses 4, which forces creatures to walk around fences.
-    # 6 cells × 0.2667 yd ≈ 1.60 yd — Vanilla-WotLK step semantics at
-    # 2000 resolution. Preserves the 1.60 yd world-unit step. The mmap
-    # is shared with every creature, NPC patrol, escort, and quest mob;
-    # tightening below stock breaks patrols that cross 1.5y ledges.
     walkableClimb: 4
 
     # Minimum distance (in cell units) around walkable surfaces.
     # Helps prevent NPCs from clipping into walls and narrow gaps.
     # To convert to world units, multiply by cellSize (see "Cell Size Calculation").
-    # 2 cells × 0.2667 yd ≈ 0.53 yd — AC stock world-unit buffer at
-    # 2000 resolution. Tested wider (= 0.71y world units): erodes polys
-    # near mountains/cliffs so pathfinder routes through surviving
-    # (higher/worse) polys → bot climbs mountains.
     walkableRadius: 2
 
     # Number of vertices along one edge of the entire map's navmesh grid.
     # Higher values increase mesh resolution but also CPU/memory usage.
-    # 2000 = AC stock baseline. cellSize ≈ 0.2667 yd.
-    vertexPerMapEdge: 2000
+    verticesPerMapEdge: 2000
 
     # Number of vertices along one edge of each tile chunk.
-    # Must divide vertexPerMapEdge evenly — the generator uses integer
-    # division: tilesPerMapEdge = vertexPerMap / vertexPerTile
-    # (src/tools/mmaps_generator/Config.cpp:144).
+    # Must divide (verticesPerMapEdge - 1) evenly for seamless tiles.
     # A higher vertex count per tile means fewer total tiles,
     # reducing runtime work to load, unload, and manage tiles.
-    # 80 = AC stock baseline. 2000 / 80 = 25 tiles per map edge, 625
-    # tiles per map (~21y per tile). Lots of small tiles, low per-tile
-    # RAM, more seams to stitch across.
-    vertexPerTileEdge: 80
+    verticesPerTileEdge: 80
 
     # Tolerance for how much a polygon can deviate from the original geometry when simplified.
     # Higher values produce simpler (faster) meshes but can reduce accuracy.
-    # 0.8 (vs the AC stock 1.8 and recast canonical 1.3) keeps polygon
-    # edges close to real terrain. Targets "merged step into ramp"
-    # simplification artifacts that produce corner-cuts and false NOPATH.
     maxSimplificationError: 0.8
 
     # You can override any global parameter for a specific map by specifying its map ID.
@@ -153,9 +147,6 @@ mmapsConfig:
     # All parameters defined globally are eligible for override.
     # Just specify the parameter name and new value in the override section.
     mapsOverrides:
-      "562": # Blade's Edge Arena
-        walkableRadius: 0 # This allows walking on the ropes to the pillars
-
       "48": # Blackfathom Deeps
         cellSizeVertical: 0.5334 # ch*2 = 0.2667 * 2 ≈ 0.5334. Reduce the chance to have underground levels.
 
